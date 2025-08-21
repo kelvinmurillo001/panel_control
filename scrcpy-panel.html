@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Conectar al Dispositivo</title>
+  <link rel="icon" href="kmez.ico" type="image/x-icon" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    .panel {
+      background: #fff;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .logo {
+      width: 100px;
+      height: auto;
+      margin-bottom: 15px;
+    }
+
+    h1 {
+      font-size: 1.6em;
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    p {
+      font-size: 0.95em;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    input[type="text"] {
+      padding: 10px;
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      font-size: 1em;
+    }
+
+    button {
+      background: #007bff;
+      color: white;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+
+    .respuesta {
+      margin-top: 20px;
+      font-size: 0.95em;
+    }
+
+    .ok {
+      color: green;
+    }
+
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="panel">
+    <img src="kmez-logo.png" alt="Logo" class="logo" />
+    <h1>Control Remoto del Celular</h1>
+    <p>Ingresa la dirección IP del dispositivo para conectarte</p>
+
+    <input type="text" id="ip" placeholder="Ej. 192.168.1.100" />
+
+    <button onclick="conectar()">Conectar</button>
+
+    <div class="respuesta" id="respuesta"></div>
+  </div>
+
+  <script>
+    async function conectar() {
+      const ip = document.getElementById('ip').value.trim();
+      const respuestaDiv = document.getElementById('respuesta');
+      respuestaDiv.innerHTML = '';
+
+      if (!ip) {
+        respuestaDiv.innerHTML = '<span class="error">⚠️ Por favor, ingresa una IP.</span>';
+        return;
+      }
+
+      try {
+        const res = await fetch('http://localhost:5501/conectar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip })
+        });
+
+        const data = await res.json();
+
+        if (data.ok) {
+          respuestaDiv.innerHTML = '<span class="ok">✅ Conexión iniciada correctamente.</span>';
+        } else {
+          respuestaDiv.innerHTML = `<span class="error">❌ Error: ${data.error || "no se pudo conectar"}</span>`;
+        }
+      } catch (err) {
+        respuestaDiv.innerHTML = '<span class="error">❌ No se pudo contactar con el servidor.</span>';
+      }
+    }
+  </script>
+
+</body>
+</html>
