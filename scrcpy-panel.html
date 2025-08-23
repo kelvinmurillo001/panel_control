@@ -1,151 +1,92 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Conectar al Dispositivo</title>
-  <link rel="icon" href="kmez.ico" type="image/x-icon" />
-  <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background: linear-gradient(135deg, #f8f9fa, #e0e0e0);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      margin: 0;
-    }
-
-    .panel {
-      background: #ffffff;
-      padding: 35px 30px;
-      border-radius: 12px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-      text-align: center;
-      max-width: 420px;
-      width: 100%;
-    }
-
-    .logo {
-      width: 90px;
-      height: auto;
-      margin-bottom: 20px;
-    }
-
-    h1 {
-      font-size: 1.7em;
-      margin-bottom: 8px;
-      color: #222;
-    }
-
-    p {
-      font-size: 1em;
-      color: #555;
-      margin-bottom: 25px;
-    }
-
-    input[type="text"] {
-      padding: 12px;
-      width: 100%;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      margin-bottom: 18px;
-      font-size: 1em;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    input[type="text"]:focus {
-      border-color: #007bff;
-    }
-
-    button {
-      background: #007bff;
-      color: #fff;
-      padding: 12px 20px;
-      border: none;
-      border-radius: 8px;
-      font-size: 1em;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-
-    button:hover {
-      background: #0056b3;
-    }
-
-    .respuesta {
-      margin-top: 20px;
-      font-size: 0.95em;
-    }
-
-    .ok {
-      color: green;
-    }
-
-    .error {
-      color: red;
-    }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Panel – Conexión Única</title>
+<link rel="icon" href="kmez.ico" type="image/x-icon"/>
+<style>
+  :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#7dffa6;--err:#ff8a8a;--btn:#3a6ff8}
+  *{box-sizing:border-box} html,body{height:100%}
+  body{margin:0;background:var(--bg);color:#e8eefc;font-family:system-ui,Segoe UI,Roboto,Arial;display:grid;place-items:center}
+  .card{width:min(520px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  h1{margin:0 0 6px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747}
+  .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}
+  .dot.ok{background:var(--ok)}
+  button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer}
+  button.secondary{background:#2a3a6a}
+  button:disabled{opacity:.6;cursor:not-allowed}
+  .foot{margin-top:14px;color:var(--muted);font-size:.9rem}
+</style>
 </head>
 <body>
+  <div class="card" role="region" aria-label="Panel de conexión única">
+    <h1>Conexión única</h1>
+    <p>Un dispositivo · Un servidor (Contabo)</p>
 
-  <div class="panel">
-    <img src="kmez-logo.png" alt="Logo de KMEZ" class="logo" />
-    <h1>Control Remoto del Celular</h1>
-    <p>Ingresa la dirección IP del dispositivo al que deseas conectarte</p>
+    <div class="row" style="margin:10px 0 16px">
+      <div class="pill" aria-live="polite">
+        <span id="dot" class="dot" aria-hidden="true"></span>
+        <span id="st">Desconectado</span>
+      </div>
+      <div class="row" style="gap:8px">
+        <button id="btn" aria-label="Conectar">Conectar</button>
+        <button id="ping" class="secondary" disabled>Ping</button>
+      </div>
+    </div>
 
-    <input type="text" id="ip" placeholder="Ej. 192.168.1.100"
-           aria-label="Dirección IP del dispositivo" autocomplete="off" />
-
-    <button onclick="conectar()">Conectar</button>
-
-    <div class="respuesta" id="respuesta"></div>
+    <div class="foot" id="msg">Listo.</div>
   </div>
 
-  <script>
-    function validarIP(ip) {
-      const regex = /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/;
-      return regex.test(ip);
-    }
+<script>
+  // ===== Config mínima =====
+  const TOKEN = "CAMBIA_ESTE_TOKEN";            // debe coincidir con DEVICE_AUTH_TOKEN del VPS
+  const WS_FALLBACK = "ws://144.126.129.233/ws"; // tu Contabo (fallback si abres el HTML local)
 
-    async function conectar() {
-      const ip = document.getElementById('ip').value.trim();
-      const respuestaDiv = document.getElementById('respuesta');
-      respuestaDiv.innerHTML = '';
+  // Detecta automáticamente el host si el panel está servido por Nginx en el VPS
+  const WS_URL = (() => {
+    const https = location.protocol === "https:";
+    if (location.host) return `${https ? "wss" : "ws"}://${location.host}/ws`;
+    return WS_FALLBACK;
+  })();
 
-      if (!ip) {
-        respuestaDiv.innerHTML = '<span class="error">⚠️ Por favor, ingresa una dirección IP.</span>';
-        return;
-      }
+  let ws = null;
+  const $ = s => document.querySelector(s);
+  const btn = $("#btn"), dot = $("#dot"), st = $("#st"), msg = $("#msg"), ping = $("#ping");
 
-      if (!validarIP(ip)) {
-        respuestaDiv.innerHTML = '<span class="error">❌ IP inválida. Ej: 192.168.0.100</span>';
-        return;
-      }
+  function setState(connected){
+    dot.className = "dot" + (connected ? " ok" : "");
+    st.textContent = connected ? "Conectado" : "Desconectado";
+    btn.textContent = connected ? "Desconectar" : "Conectar";
+    ping.disabled = !connected;
+  }
+  function log(t){ msg.textContent = t; }
 
-      try {
-        const res = await fetch('http://localhost:5501/conectar', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ ip })
-        });
+  function connect(){
+    if (ws && ws.readyState === 1) return;
+    try {
+      ws = new WebSocket(`${WS_URL}?role=panel&token=${encodeURIComponent(TOKEN)}`);
+    } catch { log("URL inválida"); return; }
 
-        const data = await res.json();
+    ws.onopen    = () => { setState(true);  log("Conectado al relay"); };
+    ws.onclose   = () => { setState(false); log("Desconectado"); };
+    ws.onerror   = () => { setState(false); log("Error de conexión"); };
+    ws.onmessage = (ev) => {
+      try{
+        const m = JSON.parse(ev.data);
+        if (m.type === "status") log(m.online ? "Dispositivo ONLINE" : "Dispositivo OFFLINE");
+        else if (m.from === "device") log(`Device → ${m.type || "event"}`);
+      }catch{}
+    };
+  }
 
-        if (data.ok) {
-          respuestaDiv.innerHTML = '<span class="ok">✅ Conexión iniciada correctamente.</span>';
-        } else {
-          respuestaDiv.innerHTML = `<span class="error">❌ Error: ${data.error || "No se pudo conectar al dispositivo."}</span>`;
-        }
-      } catch (err) {
-        console.error("❌ Error de conexión:", err);
-        respuestaDiv.innerHTML = '<span class="error">❌ No se pudo contactar con el servidor.</span>';
-      }
-    }
-  </script>
+  btn.onclick = () => { if (ws && ws.readyState === 1) ws.close(1000,"manual"); else connect(); };
+  ping.onclick = () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type:"cmd", payload:{ action:"ping", ts:Date.now() } })); };
 
+  // Autoconectar al abrir
+  connect();
+</script>
 </body>
 </html>
