@@ -13,11 +13,9 @@
   h1{margin:0 0 6px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)}
   .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
   .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747}
-  .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}
-  .dot.ok{background:var(--ok)}
+  .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}.dot.ok{background:var(--ok)}
   button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer}
-  button.secondary{background:#2a3a6a}
-  button:disabled{opacity:.6;cursor:not-allowed}
+  button.secondary{background:#2a3a6a} button:disabled{opacity:.6;cursor:not-allowed}
   .foot{margin-top:14px;color:var(--muted);font-size:.9rem}
 </style>
 </head>
@@ -42,17 +40,15 @@
 
 <script>
   // ===== Config mínima =====
-  const TOKEN = "CAMBIA_ESTE_TOKEN";            // debe coincidir con DEVICE_AUTH_TOKEN del VPS
-  const WS_FALLBACK = "ws://144.126.129.233/ws"; // tu Contabo (fallback si abres el HTML local)
+  const TOKEN = "CAMBIA_ESTE_TOKEN";             // <- reemplazar por tu token del VPS
+  const FALLBACK = "ws://144.126.129.233/ws";    // <- IP de tu Contabo (por si abres el HTML local)
 
-  // Detecta automáticamente el host si el panel está servido por Nginx en el VPS
-  const WS_URL = (() => {
-    const https = location.protocol === "https:";
-    if (location.host) return `${https ? "wss" : "ws"}://${location.host}/ws`;
-    return WS_FALLBACK;
-  })();
+  // Usa el host actual si estás sirviendo el HTML desde Nginx del VPS
+  const WS_URL = location.host
+    ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`
+    : FALLBACK;
 
-  let ws = null;
+  let ws = null, manual = false, beat = null, retry = 0;
   const $ = s => document.querySelector(s);
   const btn = $("#btn"), dot = $("#dot"), st = $("#st"), msg = $("#msg"), ping = $("#ping");
 
@@ -64,15 +60,33 @@
   }
   function log(t){ msg.textContent = t; }
 
+  function startHeartbeat(){
+    stopHeartbeat();
+    beat = setInterval(() => {
+      try{ ws && ws.readyState===1 && ws.send(JSON.stringify({type:"cmd",payload:{action:"ping",ts:Date.now()}})); }catch{}
+    }, 30000); // cada 30s
+  }
+  function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
+
   function connect(){
     if (ws && ws.readyState === 1) return;
+    manual = false;
     try {
       ws = new WebSocket(`${WS_URL}?role=panel&token=${encodeURIComponent(TOKEN)}`);
     } catch { log("URL inválida"); return; }
 
-    ws.onopen    = () => { setState(true);  log("Conectado al relay"); };
-    ws.onclose   = () => { setState(false); log("Desconectado"); };
-    ws.onerror   = () => { setState(false); log("Error de conexión"); };
+    ws.onopen = () => { retry = 0; setState(true); log("Conectado al relay"); startHeartbeat(); };
+    ws.onclose = () => {
+      setState(false); stopHeartbeat();
+      if (!manual){
+        const backoff = Math.min(10000, 1000 * Math.pow(2, retry++)); // hasta 10s
+        log("Desconectado. Reintentando en " + Math.round(backoff/1000) + "s…");
+        setTimeout(connect, backoff);
+      } else {
+        log("Desconectado");
+      }
+    };
+    ws.onerror = () => { /* los errores en WS no traen detalle; se maneja en onclose */ };
     ws.onmessage = (ev) => {
       try{
         const m = JSON.parse(ev.data);
@@ -82,8 +96,13 @@
     };
   }
 
-  btn.onclick = () => { if (ws && ws.readyState === 1) ws.close(1000,"manual"); else connect(); };
-  ping.onclick = () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type:"cmd", payload:{ action:"ping", ts:Date.now() } })); };
+  btn.onclick = () => {
+    if (ws && ws.readyState === 1){ manual = true; try{ ws.close(1000,"manual"); }catch{} }
+    else { connect(); }
+  };
+  ping.onclick = () => {
+    try{ ws && ws.readyState===1 && ws.send(JSON.stringify({ type:"cmd", payload:{ action:"ping", ts:Date.now() } })); }catch{}
+  };
 
   // Autoconectar al abrir
   connect();
