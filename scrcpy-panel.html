@@ -6,28 +6,35 @@
 <title>Panel – Conexión Única</title>
 <link rel="icon" href="kmez.ico" type="image/x-icon"/>
 <style>
-  :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#7dffa6;--err:#ff8a8a;--btn:#3a6ff8}
+  :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#7dffa6;--warn:#ffd27d;--err:#ff8a8a;--btn:#3a6ff8}
   *{box-sizing:border-box} html,body{height:100%}
   body{margin:0;background:var(--bg);color:#e8eefc;font-family:system-ui,Segoe UI,Roboto,Arial;display:grid;place-items:center}
-  .card{width:min(520px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card{width:min(560px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
   h1{margin:0 0 6px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)}
-  .row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+  .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
   .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747}
-  .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}.dot.ok{background:var(--ok)}
+  .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
   button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer}
   button.secondary{background:#2a3a6a} button:disabled{opacity:.6;cursor:not-allowed}
-  .foot{margin-top:14px;color:var(--muted);font-size:.9rem}
+  .foot{margin-top:14px;color:var(--muted);font-size:.9rem;min-height:1.2em}
+  .mini{font-size:.85rem;color:var(--muted)}
+  code{background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
 </style>
 </head>
 <body>
   <div class="card" role="region" aria-label="Panel de conexión única">
     <h1>Conexión única</h1>
-    <p>Un dispositivo · Un servidor (Contabo)</p>
+    <p class="mini">Servidor: <code id="wsu"></code></p>
 
     <div class="row" style="margin:10px 0 16px">
       <div class="pill" aria-live="polite">
         <span id="dot" class="dot" aria-hidden="true"></span>
         <span id="st">Desconectado</span>
+      </div>
+      <div class="pill" aria-live="polite" title="Estado de la App">
+        <span id="dotApp" class="dot"></span>
+        <span id="stApp">App: desconocido</span>
       </div>
       <div class="row" style="gap:8px">
         <button id="btn" aria-label="Conectar">Conectar</button>
@@ -40,69 +47,140 @@
 
 <script>
   // ===== Config mínima =====
-  const TOKEN = "CAMBIA_ESTE_TOKEN";             // <- reemplazar por tu token del VPS
-  const FALLBACK = "ws://144.126.129.233/ws";    // <- IP de tu Contabo (por si abres el HTML local)
+  // ⚠️ Usa el MISMO token en el VPS (RELAY_TOKEN) y en la app.
+  const TOKEN = "PON_AQUI_UN_TOKEN_LARGO_Y_UNICO";
+  const FALLBACK = "ws://144.126.129.233/ws"; // por si abres el HTML en local sin Nginx
 
-  // Usa el host actual si estás sirviendo el HTML desde Nginx del VPS
+  // URL del WebSocket: si sirves desde Nginx, autoconstruye con el host actual
   const WS_URL = location.host
     ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`
     : FALLBACK;
 
-  let ws = null, manual = false, beat = null, retry = 0;
+  // ===== Helpers UI
   const $ = s => document.querySelector(s);
-  const btn = $("#btn"), dot = $("#dot"), st = $("#st"), msg = $("#msg"), ping = $("#ping");
+  const dot = $("#dot"), st = $("#st"), msg = $("#msg"), btn = $("#btn"),
+        ping = $("#ping"), dotApp = $("#dotApp"), stApp = $("#stApp"),
+        wsu = $("#wsu");
+  wsu.textContent = WS_URL;
 
-  function setState(connected){
+  function setPanelState(connected){
     dot.className = "dot" + (connected ? " ok" : "");
-    st.textContent = connected ? "Conectado" : "Desconectado";
+    st.textContent = connected ? "Conectado al relay" : "Desconectado";
     btn.textContent = connected ? "Desconectar" : "Conectar";
     ping.disabled = !connected;
   }
+  function setAppState(connected){
+    dotApp.className = "dot" + (connected ? " ok" : "");
+    stApp.textContent = connected ? "App: conectada" : "App: desconectada";
+  }
+  function setAppWarn(){ dotApp.className = "dot warn"; stApp.textContent = "App: sin respuesta"; }
   function log(t){ msg.textContent = t; }
+
+  // ===== WS + Heartbeat
+  let ws = null, manualClose = false, beat = null, retry = 0, appAliveTs = 0;
+  let visTimer = null;
+
+  function safeJSON(x){ try{ return JSON.parse(x); }catch{ return null; } }
+  function send(obj){
+    if(ws && ws.readyState===1){
+      try{ ws.send(JSON.stringify(obj)); }catch{}
+    }
+  }
 
   function startHeartbeat(){
     stopHeartbeat();
+    // ping periódico panel -> app (vía relay)
     beat = setInterval(() => {
-      try{ ws && ws.readyState===1 && ws.send(JSON.stringify({type:"cmd",payload:{action:"ping",ts:Date.now()}})); }catch{}
-    }, 30000); // cada 30s
+      send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
+      // si pasaron >45s sin pong de app, muestra warn
+      if (Date.now() - appAliveTs > 45000) setAppWarn();
+    }, 30000);
   }
   function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
   function connect(){
     if (ws && ws.readyState === 1) return;
-    manual = false;
+    manualClose = false;
     try {
       ws = new WebSocket(`${WS_URL}?role=panel&token=${encodeURIComponent(TOKEN)}`);
-    } catch { log("URL inválida"); return; }
+    } catch {
+      log("URL inválida del WebSocket"); return;
+    }
 
-    ws.onopen = () => { retry = 0; setState(true); log("Conectado al relay"); startHeartbeat(); };
+    ws.onopen = () => {
+      retry = 0; setPanelState(true); log("Conectado al relay");
+      startHeartbeat();
+      // consulta estado inicial
+      send({ type:"cmd", payload:{ action:"status" } });
+    };
+
     ws.onclose = () => {
-      setState(false); stopHeartbeat();
-      if (!manual){
+      setPanelState(false); stopHeartbeat(); setAppState(false);
+      if (!manualClose){
         const backoff = Math.min(10000, 1000 * Math.pow(2, retry++)); // hasta 10s
         log("Desconectado. Reintentando en " + Math.round(backoff/1000) + "s…");
         setTimeout(connect, backoff);
       } else {
-        log("Desconectado");
+        log("Desconectado.");
       }
     };
-    ws.onerror = () => { /* los errores en WS no traen detalle; se maneja en onclose */ };
+
+    ws.onerror = () => { /* onclose maneja el detalle */ };
+
     ws.onmessage = (ev) => {
-      try{
-        const m = JSON.parse(ev.data);
-        if (m.type === "status") log(m.online ? "Dispositivo ONLINE" : "Dispositivo OFFLINE");
-        else if (m.from === "device") log(`Device → ${m.type || "event"}`);
-      }catch{}
+      const m = safeJSON(ev.data); if(!m) return;
+      // Protocolos esperados desde el relay/app:
+      // {type:"app_status", connected:true|false}
+      // {type:"pong", payload:{ts:...}}
+      // {type:"status", payload:{state:"ready|starting|running|stopping"...}}
+      // o mensajes de evento {from:"device", type:"...", ...}
+      if (m.type === "app_status"){
+        if (m.connected) { setAppState(true); appAliveTs = Date.now(); }
+        else setAppState(false);
+        return;
+      }
+      if (m.type === "pong"){
+        appAliveTs = Date.now();
+        log("Pong recibido");
+        setAppState(true);
+        return;
+      }
+      if (m.type === "status"){
+        const payload = m.payload || {};
+        const s = String(payload.state || "");
+        if (s) log("Estado de la app: " + s);
+        if (payload.online !== undefined) {
+          setAppState(!!payload.online);
+        }
+        return;
+      }
+      if (m.from === "device"){
+        log(`Device → ${m.type || "evento"}`);
+        return;
+      }
     };
   }
 
   btn.onclick = () => {
-    if (ws && ws.readyState === 1){ manual = true; try{ ws.close(1000,"manual"); }catch{} }
+    if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} }
     else { connect(); }
   };
-  ping.onclick = () => {
-    try{ ws && ws.readyState===1 && ws.send(JSON.stringify({ type:"cmd", payload:{ action:"ping", ts:Date.now() } })); }catch{}
-  };
+
+  ping.onclick = () => send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
+
+  // Reconexión si cambia visibilidad (útil en móviles)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible"){
+      clearTimeout(visTimer);
+      visTimer = setTimeout(() => {
+        if (!ws || ws.readyState !== 1) connect();
+      }, 300);
+    }
+  });
+
+  // Notifica offline/online del navegador
+  window.addEventListener("offline", () => { log("Sin conexión de red."); dot.className="dot err"; });
+  window.addEventListener("online",  () => { log("Conexión de red restaurada."); if(!ws || ws.readyState!==1) connect(); });
 
   // Autoconectar al abrir
   connect();
