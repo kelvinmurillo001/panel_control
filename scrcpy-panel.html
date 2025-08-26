@@ -34,7 +34,7 @@
       </div>
       <div class="pill" aria-live="polite" title="Estado de la App">
         <span id="dotApp" class="dot"></span>
-        <span id="stApp">App: desconocido</span>
+        <span id="stApp">App: desconectada</span>
       </div>
       <div class="row" style="gap:8px">
         <button id="btn" aria-label="Conectar">Conectar</button>
@@ -47,21 +47,22 @@
 
 <script>
   // ===== Config mínima =====
-  // ⚠️ Usa el MISMO token en el VPS (RELAY_TOKEN) y en la app.
-  const TOKEN = "PON_AQUI_UN_TOKEN_LARGO_Y_UNICO";
-  const FALLBACK = "ws://144.126.129.233/ws"; // por si abres el HTML en local sin Nginx
+  // Usa el MISMO token que en el VPS y la app
+  const TOKEN = "U1e2w3x4y5z6-Token_Super-Largo_2025_Contabo#KM-EZ";
 
-  // URL del WebSocket: si sirves desde Nginx, autoconstruye con el host actual
-  const WS_URL = location.host
-    ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`
-    : FALLBACK;
+  // Hosts candidatos: el host actual y nip.io como fallback (móviles suelen preferir dominio)
+  const BASE_HOST = (location.host || "144.126.129.233");
+  const HOSTS = [ BASE_HOST ];
+  if (!/nip\.io$/i.test(BASE_HOST)) HOSTS.push("144.126.129.233.nip.io");
+
+  const SCHEME = location.protocol === "https:" ? "wss" : "ws";
+  const wsOf = (host) => `${SCHEME}://${host}/ws`;
 
   // ===== Helpers UI
   const $ = s => document.querySelector(s);
   const dot = $("#dot"), st = $("#st"), msg = $("#msg"), btn = $("#btn"),
         ping = $("#ping"), dotApp = $("#dotApp"), stApp = $("#stApp"),
         wsu = $("#wsu");
-  wsu.textContent = WS_URL;
 
   function setPanelState(connected){
     dot.className = "dot" + (connected ? " ok" : "");
@@ -69,31 +70,25 @@
     btn.textContent = connected ? "Desconectar" : "Conectar";
     ping.disabled = !connected;
   }
-  function setAppState(connected){
-    dotApp.className = "dot" + (connected ? " ok" : "");
-    stApp.textContent = connected ? "App: conectada" : "App: desconectada";
-  }
-  function setAppWarn(){ dotApp.className = "dot warn"; stApp.textContent = "App: sin respuesta"; }
+  function setAppDisconnected(){ dotApp.className="dot";      stApp.textContent="App: desconectada"; }
+  function setAppConnected()   { dotApp.className="dot ok";   stApp.textContent="App: conectada"; }
+  function setAppWarn()        { dotApp.className="dot warn"; stApp.textContent="App: sin respuesta"; }
   function log(t){ msg.textContent = t; }
 
   // ===== WS + Heartbeat
   let ws = null, manualClose = false, beat = null, retry = 0, appAliveTs = 0;
+  let appSeen = false;     // <- sólo avisamos "sin respuesta" si alguna vez estuvo conectada
+  let hostIndex = 0;       // <- rotación de host
   let visTimer = null;
 
   function safeJSON(x){ try{ return JSON.parse(x); }catch{ return null; } }
-  function send(obj){
-    if(ws && ws.readyState===1){
-      try{ ws.send(JSON.stringify(obj)); }catch{}
-    }
-  }
+  function send(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify(obj)); }catch{} } }
 
   function startHeartbeat(){
     stopHeartbeat();
-    // ping periódico panel -> app (vía relay)
     beat = setInterval(() => {
       send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
-      // si pasaron >45s sin pong de app, muestra warn
-      if (Date.now() - appAliveTs > 45000) setAppWarn();
+      if (appSeen && Date.now() - appAliveTs > 45000) setAppWarn();
     }, 30000);
   }
   function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
@@ -101,24 +96,26 @@
   function connect(){
     if (ws && ws.readyState === 1) return;
     manualClose = false;
-    try {
-      ws = new WebSocket(`${WS_URL}?role=panel&token=${encodeURIComponent(TOKEN)}`);
-    } catch {
-      log("URL inválida del WebSocket"); return;
-    }
+
+    const host = HOSTS[hostIndex % HOSTS.length];
+    const URL  = `${wsOf(host)}?role=panel&token=${encodeURIComponent(TOKEN)}`;
+    wsu.textContent = wsOf(host);
+
+    try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
 
     ws.onopen = () => {
-      retry = 0; setPanelState(true); log("Conectado al relay");
+      retry = 0; setPanelState(true); log("Conectado al relay ("+host+")");
       startHeartbeat();
-      // consulta estado inicial
       send({ type:"cmd", payload:{ action:"status" } });
     };
 
     ws.onclose = () => {
-      setPanelState(false); stopHeartbeat(); setAppState(false);
+      setPanelState(false); stopHeartbeat();
       if (!manualClose){
-        const backoff = Math.min(10000, 1000 * Math.pow(2, retry++)); // hasta 10s
-        log("Desconectado. Reintentando en " + Math.round(backoff/1000) + "s…");
+        if (!appSeen) setAppDisconnected();
+        const backoff = Math.min(10000, 1000 * Math.pow(2, retry++));
+        hostIndex = (hostIndex + 1) % HOSTS.length;   // rota entre host y nip.io
+        log(`Desconectado. Reintentando en ${Math.round(backoff/1000)}s… (host ${HOSTS[hostIndex]})`);
         setTimeout(connect, backoff);
       } else {
         log("Desconectado.");
@@ -129,35 +126,27 @@
 
     ws.onmessage = (ev) => {
       const m = safeJSON(ev.data); if(!m) return;
-      // Protocolos esperados desde el relay/app:
-      // {type:"app_status", connected:true|false}
-      // {type:"pong", payload:{ts:...}}
-      // {type:"status", payload:{state:"ready|starting|running|stopping"...}}
-      // o mensajes de evento {from:"device", type:"...", ...}
+      if (m.type) log(`Evento: ${m.type}`);
+
       if (m.type === "app_status"){
-        if (m.connected) { setAppState(true); appAliveTs = Date.now(); }
-        else setAppState(false);
+        if (m.connected){ appSeen = true; appAliveTs = Date.now(); setAppConnected(); }
+        else setAppDisconnected();
         return;
       }
       if (m.type === "pong"){
-        appAliveTs = Date.now();
-        log("Pong recibido");
-        setAppState(true);
+        appSeen = true; appAliveTs = Date.now(); setAppConnected(); log("Pong recibido");
         return;
       }
       if (m.type === "status"){
-        const payload = m.payload || {};
-        const s = String(payload.state || "");
-        if (s) log("Estado de la app: " + s);
-        if (payload.online !== undefined) {
-          setAppState(!!payload.online);
+        const p = m.payload || {};
+        if (typeof p.online === "boolean"){
+          if (p.online){ appSeen = true; setAppConnected(); appAliveTs = Date.now(); }
+          else setAppDisconnected();
         }
+        if (p.state) log("Estado de la app: " + p.state);
         return;
       }
-      if (m.from === "device"){
-        log(`Device → ${m.type || "evento"}`);
-        return;
-      }
+      if (m.from === "device"){ log(`Device → ${m.type || "evento"}`); return; }
     };
   }
 
@@ -165,24 +154,18 @@
     if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} }
     else { connect(); }
   };
-
   ping.onclick = () => send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
 
-  // Reconexión si cambia visibilidad (útil en móviles)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible"){
       clearTimeout(visTimer);
-      visTimer = setTimeout(() => {
-        if (!ws || ws.readyState !== 1) connect();
-      }, 300);
+      visTimer = setTimeout(() => { if (!ws || ws.readyState !== 1) connect(); }, 300);
     }
   });
 
-  // Notifica offline/online del navegador
   window.addEventListener("offline", () => { log("Sin conexión de red."); dot.className="dot err"; });
   window.addEventListener("online",  () => { log("Conexión de red restaurada."); if(!ws || ws.readyState!==1) connect(); });
 
-  // Autoconectar al abrir
   connect();
 </script>
 </body>
