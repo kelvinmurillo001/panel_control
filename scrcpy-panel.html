@@ -39,6 +39,9 @@
       <div class="row" style="gap:8px">
         <button id="btn" aria-label="Conectar">Conectar</button>
         <button id="ping" class="secondary" disabled>Ping</button>
+        <button id="start" class="secondary" disabled>Start</button>
+        <button id="stop"  class="secondary" disabled>Stop</button>
+        <button id="status" class="secondary" disabled>Estado</button>
       </div>
     </div>
 
@@ -62,13 +65,17 @@
   const $ = s => document.querySelector(s);
   const dot = $("#dot"), st = $("#st"), msg = $("#msg"), btn = $("#btn"),
         ping = $("#ping"), dotApp = $("#dotApp"), stApp = $("#stApp"),
+        startBtn = $("#start"), stopBtn = $("#stop"), statusBtn = $("#status"),
         wsu = $("#wsu");
 
   function setPanelState(connected){
     dot.className = "dot" + (connected ? " ok" : "");
     st.textContent = connected ? "Conectado al relay" : "Desconectado";
     btn.textContent = connected ? "Desconectar" : "Conectar";
-    ping.disabled = !connected;
+    ping.disabled    = !connected;
+    startBtn.disabled  = !connected;
+    stopBtn.disabled   = !connected;
+    statusBtn.disabled = !connected;
   }
   function setAppDisconnected(){ dotApp.className="dot";      stApp.textContent="App: desconectada"; }
   function setAppConnected()   { dotApp.className="dot ok";   stApp.textContent="App: conectada"; }
@@ -150,12 +157,14 @@
     };
   }
 
-  btn.onclick = () => {
-    if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} }
-    else { connect(); }
-  };
-  ping.onclick = () => send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
+  // Botones
+  btn.onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
+  ping.onclick   = () => send({ type:"cmd", payload:{ action:"ping",   ts:Date.now() } });
+  startBtn.onclick  = () => send({ type:"cmd", payload:{ action:"start"  } });
+  stopBtn.onclick   = () => send({ type:"cmd", payload:{ action:"stop"   } });
+  statusBtn.onclick = () => send({ type:"cmd", payload:{ action:"status" } });
 
+  // Reconexión si cambia visibilidad (útil en móviles)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible"){
       clearTimeout(visTimer);
@@ -163,9 +172,11 @@
     }
   });
 
+  // Notifica offline/online del navegador
   window.addEventListener("offline", () => { log("Sin conexión de red."); dot.className="dot err"; });
   window.addEventListener("online",  () => { log("Conexión de red restaurada."); if(!ws || ws.readyState!==1) connect(); });
 
+  // Autoconectar
   connect();
 </script>
 </body>
