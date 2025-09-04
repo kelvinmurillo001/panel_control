@@ -5,97 +5,136 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Panel – Conexión Única</title>
 <link rel="icon" href="kmez.ico" type="image/x-icon"/>
+<meta name="color-scheme" content="dark light"/>
 <style>
-  :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#7dffa6;--warn:#ffd27d;--err:#ff8a8a;--btn:#3a6ff8}
+  :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--btn:#3a6ff8}
   *{box-sizing:border-box} html,body{height:100%}
   body{margin:0;background:var(--bg);color:#e8eefc;font-family:system-ui,Segoe UI,Roboto,Arial;display:grid;place-items:center}
-  .card{width:min(560px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card{width:min(620px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
   h1{margin:0 0 6px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)}
   .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-  .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747;color:var(--muted);font-size:.95rem}
   .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}
-  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
-  button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer}
+  .ok{background:var(--ok)!important} .warn{background:var(--warn)!important} .err{background:var(--err)!important}
+  button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer;transition:transform .05s ease}
   button.secondary{background:#2a3a6a} button:disabled{opacity:.6;cursor:not-allowed}
-  .foot{margin-top:14px;color:var(--muted);font-size:.9rem;min-height:1.2em}
+  button.ghost{background:#0c1426;border:1px solid #1b2747}
+  button:active{transform:translateY(1px)}
+  .foot{margin-top:12px;color:var(--muted);font-size:.9rem;min-height:1.2em}
   .mini{font-size:.85rem;color:var(--muted)}
   code{background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
+  pre{margin:10px 0 0;background:#0c1426;border:1px solid #1b2747;padding:10px;border-radius:10px;max-height:220px;overflow:auto;font-size:.9rem}
+  .kbd{font-family:ui-monospace, Menlo, Consolas, monospace;background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
+  /* Modal ajustes */
+  dialog{border:1px solid var(--b);background:var(--card);color:#e8eefc;border-radius:16px;width:min(560px,92vw);padding:16px}
+  dialog::backdrop{background:rgba(0,0,0,.5)}
+  label{display:block;font-size:.9rem;color:var(--muted);margin:6px 0 4px}
+  input[type="text"],input[type="password"]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #1b2747;background:#0b1220;color:#e8eefc}
 </style>
 </head>
 <body>
   <div class="card" role="region" aria-label="Panel de conexión única">
-    <h1>Conexión única</h1>
-    <p class="mini">Servidor: <code id="wsu"></code></p>
-
-    <div class="row" style="margin:10px 0 16px">
-      <div class="pill" aria-live="polite">
-        <span id="dot" class="dot" aria-hidden="true"></span>
-        <span id="st">Desconectado</span>
-      </div>
-      <div class="pill" aria-live="polite" title="Estado de la App">
-        <span id="dotApp" class="dot"></span>
-        <span id="stApp">App: desconectada</span>
-      </div>
+    <div class="row" style="margin-bottom:10px">
+      <h1 style="margin:0">Conexión única</h1>
       <div class="row" style="gap:8px">
-        <button id="btn" aria-label="Conectar">Conectar</button>
-        <button id="ping" class="secondary" disabled>Ping</button>
-        <button id="start" class="secondary" disabled>Start</button>
-        <button id="stop"  class="secondary" disabled>Stop</button>
-        <button id="status" class="secondary" disabled>Estado</button>
+        <span class="pill" id="wsBadge">WS: <b id="st">Desconectado</b></span>
+        <span class="pill" id="appBadge">App: <b id="stApp">desconectada</b></span>
+        <button id="openSettings" class="ghost" aria-haspopup="dialog" title="Ajustes (A)">Ajustes</button>
       </div>
     </div>
 
+    <p class="mini">Servidor WS: <code id="wsu"></code></p>
+
+    <div class="row" style="gap:8px;margin:10px 0 6px">
+      <button id="btn" aria-label="Conectar">Conectar</button>
+      <button id="ping" class="secondary" disabled>Ping <span class="kbd">P</span></button>
+      <button id="start" class="secondary" disabled>Start <span class="kbd">S</span></button>
+      <button id="stop"  class="secondary" disabled>Stop <span class="kbd">X</span></button>
+      <button id="status" class="secondary" disabled>Estado</button>
+      <button id="clear" class="ghost">Limpiar log</button>
+    </div>
+
     <div class="foot" id="msg">Listo.</div>
+    <pre id="log" aria-live="polite"></pre>
   </div>
 
+  <!-- Modal Ajustes -->
+  <dialog id="dlg">
+    <form method="dialog">
+      <h3 style="margin:.2rem 0 .6rem">Ajustes de conexión</h3>
+      <label>TOKEN (Bearer)</label>
+      <input id="inToken" type="password" placeholder="Introduce tu TOKEN"/>
+      <div class="row" style="gap:12px;justify-content:stretch">
+        <div style="flex:1">
+          <label>Host (por defecto el actual)</label>
+          <input id="inHost" type="text" placeholder="ej: kmezropacatalogo.com"/>
+        </div>
+        <div style="flex:1">
+          <label>Ruta WS</label>
+          <input id="inPath" type="text" value="/ws"/>
+        </div>
+      </div>
+      <p class="mini">Los ajustes se guardan sólo en este navegador (localStorage).</p>
+      <div class="row" style="gap:8px;margin-top:10px">
+        <button id="btnSave">Guardar</button>
+        <button id="btnClose" class="ghost">Cerrar</button>
+      </div>
+    </form>
+  </dialog>
+
 <script>
-  // ===== Config mínima =====
-  // Usa el MISMO token que en el VPS y la app
-  const TOKEN = "U1e2w3x4y5z6-Token_Super-Largo_2025_Contabo#KM-EZ";
-
-  // Hosts candidatos: el host actual y nip.io como fallback (móviles suelen preferir dominio)
-  const BASE_HOST = (location.host || "144.126.129.233");
-  const HOSTS = [ BASE_HOST ];
-  if (!/nip\.io$/i.test(BASE_HOST)) HOSTS.push("144.126.129.233.nip.io");
-
-  const SCHEME = location.protocol === "https:" ? "wss" : "ws";
-  const wsOf = (host) => `${SCHEME}://${host}/ws`;
+  // ===== Persistencia de ajustes =====
+  const CFG_KEY = "kmez_panel_cfg_v1";
+  function cfgGet(){
+    const def = { token:"", host:(location.host||"144.126.129.233"), path:"/ws" };
+    try{ return Object.assign(def, JSON.parse(localStorage.getItem(CFG_KEY)||"{}")); }
+    catch{ return def; }
+  }
+  function cfgSet(v){ localStorage.setItem(CFG_KEY, JSON.stringify(v)); }
 
   // ===== Helpers UI
   const $ = s => document.querySelector(s);
-  const dot = $("#dot"), st = $("#st"), msg = $("#msg"), btn = $("#btn"),
-        ping = $("#ping"), dotApp = $("#dotApp"), stApp = $("#stApp"),
+  const msg = $("#msg"), btn = $("#btn"), ping = $("#ping"),
         startBtn = $("#start"), stopBtn = $("#stop"), statusBtn = $("#status"),
-        wsu = $("#wsu");
+        wsu = $("#wsu"), logEl = $("#log"),
+        wsBadge = $("#wsBadge"), appBadge = $("#appBadge");
 
-  function setPanelState(connected){
-    dot.className = "dot" + (connected ? " ok" : "");
-    st.textContent = connected ? "Conectado al relay" : "Desconectado";
-    btn.textContent = connected ? "Desconectar" : "Conectar";
-    ping.disabled    = !connected;
-    startBtn.disabled  = !connected;
-    stopBtn.disabled   = !connected;
-    statusBtn.disabled = !connected;
+  function badgeUpdate(badge, text, cls){
+    badge.innerHTML = `<span class="dot ${cls}" aria-hidden="true"></span> ${text}`;
   }
-  function setAppDisconnected(){ dotApp.className="dot";      stApp.textContent="App: desconectada"; }
-  function setAppConnected()   { dotApp.className="dot ok";   stApp.textContent="App: conectada"; }
-  function setAppWarn()        { dotApp.className="dot warn"; stApp.textContent="App: sin respuesta"; }
-  function log(t){ msg.textContent = t; }
+  function setPanelState(connected){
+    badgeUpdate(wsBadge, `WS: <b>${connected ? "Conectado" : "Desconectado"}</b>`, connected?"ok":"err");
+    btn.textContent = connected ? "Desconectar" : "Conectar";
+    ping.disabled = startBtn.disabled = stopBtn.disabled = statusBtn.disabled = !connected;
+  }
+  function setAppState(kind){ // ok | warn | err
+    const txt = kind==="ok" ? "conectada" : (kind==="warn" ? "sin respuesta" : "desconectada");
+    badgeUpdate(appBadge, `App: <b>${txt}</b>`, kind==="ok"?"ok":(kind==="warn"?"warn":"err"));
+  }
+  function log(...args){
+    const line = args.map(a => typeof a==="string"?a:JSON.stringify(a)).join(" ");
+    logEl.textContent = `[${new Date().toLocaleTimeString()}] ${line}\n` + logEl.textContent;
+    msg.textContent = line;
+  }
+
+  // ===== Config inicial (con fallback nip.io)
+  let { token, host, path } = cfgGet();
+  const HOSTS = [ host ];
+  if (!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+  const SCHEME = location.protocol === "https:" ? "wss" : "ws";
+  const wsOf = (h) => `${SCHEME}://${h}${path || "/ws"}`;
 
   // ===== WS + Heartbeat
   let ws = null, manualClose = false, beat = null, retry = 0, appAliveTs = 0;
-  let appSeen = false;     // <- sólo avisamos "sin respuesta" si alguna vez estuvo conectada
-  let hostIndex = 0;       // <- rotación de host
-  let visTimer = null;
+  let appSeen = false, hostIndex = 0, visTimer = null;
 
   function safeJSON(x){ try{ return JSON.parse(x); }catch{ return null; } }
-  function send(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify(obj)); }catch{} } }
-
+  function send(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify(obj)); }catch{} } else { log("WS no conectado"); } }
   function startHeartbeat(){
     stopHeartbeat();
     beat = setInterval(() => {
       send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
-      if (appSeen && Date.now() - appAliveTs > 45000) setAppWarn();
+      if (appSeen && Date.now() - appAliveTs > 45000) setAppState("warn");
     }, 30000);
   }
   function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
@@ -104,14 +143,14 @@
     if (ws && ws.readyState === 1) return;
     manualClose = false;
 
-    const host = HOSTS[hostIndex % HOSTS.length];
-    const URL  = `${wsOf(host)}?role=panel&token=${encodeURIComponent(TOKEN)}`;
-    wsu.textContent = wsOf(host);
+    const h = HOSTS[hostIndex % HOSTS.length];
+    const URL  = `${wsOf(h)}?role=panel&token=${encodeURIComponent(token||"")}`;
+    wsu.textContent = wsOf(h);
 
     try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
 
     ws.onopen = () => {
-      retry = 0; setPanelState(true); log("Conectado al relay ("+host+")");
+      retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
       startHeartbeat();
       send({ type:"cmd", payload:{ action:"status" } });
     };
@@ -119,9 +158,9 @@
     ws.onclose = () => {
       setPanelState(false); stopHeartbeat();
       if (!manualClose){
-        if (!appSeen) setAppDisconnected();
+        if (!appSeen) setAppState("err");
         const backoff = Math.min(10000, 1000 * Math.pow(2, retry++));
-        hostIndex = (hostIndex + 1) % HOSTS.length;   // rota entre host y nip.io
+        hostIndex = (hostIndex + 1) % HOSTS.length;
         log(`Desconectado. Reintentando en ${Math.round(backoff/1000)}s… (host ${HOSTS[hostIndex]})`);
         setTimeout(connect, backoff);
       } else {
@@ -129,26 +168,26 @@
       }
     };
 
-    ws.onerror = () => { /* onclose maneja el detalle */ };
+    ws.onerror = () => { /* handled by onclose */ };
 
     ws.onmessage = (ev) => {
       const m = safeJSON(ev.data); if(!m) return;
       if (m.type) log(`Evento: ${m.type}`);
 
       if (m.type === "app_status"){
-        if (m.connected){ appSeen = true; appAliveTs = Date.now(); setAppConnected(); }
-        else setAppDisconnected();
+        if (m.connected){ appSeen = true; appAliveTs = Date.now(); setAppState("ok"); }
+        else setAppState("err");
         return;
       }
       if (m.type === "pong"){
-        appSeen = true; appAliveTs = Date.now(); setAppConnected(); log("Pong recibido");
+        appSeen = true; appAliveTs = Date.now(); setAppState("ok"); log("Pong recibido");
         return;
       }
       if (m.type === "status"){
         const p = m.payload || {};
         if (typeof p.online === "boolean"){
-          if (p.online){ appSeen = true; setAppConnected(); appAliveTs = Date.now(); }
-          else setAppDisconnected();
+          if (p.online){ appSeen = true; setAppState("ok"); appAliveTs = Date.now(); }
+          else setAppState("err");
         }
         if (p.state) log("Estado de la app: " + p.state);
         return;
@@ -158,11 +197,21 @@
   }
 
   // Botones
-  btn.onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
-  ping.onclick   = () => send({ type:"cmd", payload:{ action:"ping",   ts:Date.now() } });
-  startBtn.onclick  = () => send({ type:"cmd", payload:{ action:"start"  } });
-  stopBtn.onclick   = () => send({ type:"cmd", payload:{ action:"stop"   } });
-  statusBtn.onclick = () => send({ type:"cmd", payload:{ action:"status" } });
+  $("#btn").onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
+  $("#ping").onclick   = () => send({ type:"cmd", payload:{ action:"ping",   ts:Date.now() } });
+  $("#start").onclick  = () => send({ type:"cmd", payload:{ action:"start"  } });
+  $("#stop").onclick   = () => send({ type:"cmd", payload:{ action:"stop"   } });
+  $("#status").onclick = () => send({ type:"cmd", payload:{ action:"status" } });
+  $("#clear").onclick  = () => { logEl.textContent=""; msg.textContent="Listo."; };
+
+  // Atajos de teclado
+  window.addEventListener("keydown",(e)=>{
+    const k = e.key.toLowerCase();
+    if(k==="p") $("#ping").click();
+    if(k==="s") $("#start").click();
+    if(k==="x") $("#stop").click();
+    if(k==="a"){ e.preventDefault(); $("#openSettings").click(); }
+  });
 
   // Reconexión si cambia visibilidad (útil en móviles)
   document.addEventListener("visibilitychange", () => {
@@ -173,8 +222,37 @@
   });
 
   // Notifica offline/online del navegador
-  window.addEventListener("offline", () => { log("Sin conexión de red."); dot.className="dot err"; });
+  window.addEventListener("offline", () => { log("Sin conexión de red."); badgeUpdate(wsBadge, 'WS: <b>Desconectado</b>', 'err'); });
   window.addEventListener("online",  () => { log("Conexión de red restaurada."); if(!ws || ws.readyState!==1) connect(); });
+
+  // Modal ajustes
+  const dlg = $("#dlg");
+  $("#openSettings").onclick = () => {
+    const c = cfgGet();
+    $("#inToken").value = c.token || "";
+    $("#inHost").value = c.host || (location.host||"");
+    $("#inPath").value = c.path || "/ws";
+    dlg.showModal();
+  };
+  $("#btnSave").onclick = (e) => {
+    e.preventDefault();
+    token = $("#inToken").value.trim();
+    host  = $("#inHost").value.trim() || (location.host||"144.126.129.233");
+    path  = $("#inPath").value.trim() || "/ws";
+    cfgSet({ token, host, path });
+    // actualizar host list y preview
+    HOSTS.length = 0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+    wsu.textContent = wsOf(host);
+    dlg.close();
+    if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
+    setTimeout(connect, 200);
+  };
+  $("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
+
+  // Estado inicial
+  setPanelState(false);
+  setAppState("err");
+  wsu.textContent = wsOf(host);
 
   // Autoconectar
   connect();
