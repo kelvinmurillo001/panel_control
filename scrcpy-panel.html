@@ -10,7 +10,7 @@
   :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--btn:#3a6ff8}
   *{box-sizing:border-box} html,body{height:100%}
   body{margin:0;background:var(--bg);color:#e8eefc;font-family:system-ui,Segoe UI,Roboto,Arial;display:grid;place-items:center}
-  .card{width:min(620px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card{width:min(680px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
   h1{margin:0 0 6px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)}
   .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
   .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747;color:var(--muted);font-size:.95rem}
@@ -23,9 +23,8 @@
   .foot{margin-top:12px;color:var(--muted);font-size:.9rem;min-height:1.2em}
   .mini{font-size:.85rem;color:var(--muted)}
   code{background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
-  pre{margin:10px 0 0;background:#0c1426;border:1px solid #1b2747;padding:10px;border-radius:10px;max-height:220px;overflow:auto;font-size:.9rem}
+  pre{margin:10px 0 0;background:#0c1426;border:1px solid #1b2747;padding:10px;border-radius:10px;max-height:240px;overflow:auto;font-size:.9rem}
   .kbd{font-family:ui-monospace, Menlo, Consolas, monospace;background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
-  /* Modal ajustes */
   dialog{border:1px solid var(--b);background:var(--card);color:#e8eefc;border-radius:16px;width:min(560px,92vw);padding:16px}
   dialog::backdrop{background:rgba(0,0,0,.5)}
   label{display:block;font-size:.9rem;color:var(--muted);margin:6px 0 4px}
@@ -67,7 +66,7 @@
       <div class="row" style="gap:12px;justify-content:stretch">
         <div style="flex:1">
           <label>Host (por defecto el actual)</label>
-          <input id="inHost" type="text" placeholder="ej: kmezropacatalogo.com"/>
+          <input id="inHost" type="text" placeholder="ej: 144.126.129.233 o subdominio"/>
         </div>
         <div style="flex:1">
           <label>Ruta WS</label>
@@ -83,24 +82,24 @@
   </dialog>
 
 <script>
-  // ===== Persistencia de ajustes =====
+  // ========= Persistencia =========
   const CFG_KEY = "kmez_panel_cfg_v1";
   function cfgGet(){
-    const def = { token:"", host:(location.host||"144.126.129.233"), path:"/ws" };
+    const def = { token:"", host:(location.host||""), path:"/ws" };
     try{ return Object.assign(def, JSON.parse(localStorage.getItem(CFG_KEY)||"{}")); }
     catch{ return def; }
   }
   function cfgSet(v){ localStorage.setItem(CFG_KEY, JSON.stringify(v)); }
 
-  // ===== Helpers UI
+  // ========= Helpers UI =========
   const $ = s => document.querySelector(s);
   const msg = $("#msg"), btn = $("#btn"), ping = $("#ping"),
         startBtn = $("#start"), stopBtn = $("#stop"), statusBtn = $("#status"),
         wsu = $("#wsu"), logEl = $("#log"),
         wsBadge = $("#wsBadge"), appBadge = $("#appBadge");
 
-  function badgeUpdate(badge, text, cls){
-    badge.innerHTML = `<span class="dot ${cls}" aria-hidden="true"></span> ${text}`;
+  function badgeUpdate(badge, html, cls){
+    badge.innerHTML = `<span class="dot ${cls}" aria-hidden="true"></span> ${html}`;
   }
   function setPanelState(connected){
     badgeUpdate(wsBadge, `WS: <b>${connected ? "Conectado" : "Desconectado"}</b>`, connected?"ok":"err");
@@ -117,19 +116,34 @@
     msg.textContent = line;
   }
 
-  // ===== Config inicial (con fallback nip.io)
+  // ========= Config inicial + fallback nip.io =========
   let { token, host, path } = cfgGet();
-  const HOSTS = [ host ];
-  if (!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+  host = host || (location.host || "");       // si vacío, el usuario lo pone en Ajustes
+  path = (path || "/ws").trim() || "/ws";
+
+  const HOSTS = [];
+  if (host) HOSTS.push(host);
+  if (host && !/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+
   const SCHEME = location.protocol === "https:" ? "wss" : "ws";
+
+  // base sin query (para mostrar)
   const wsOf = (h) => `${SCHEME}://${h}${path || "/ws"}`;
 
-  // ===== WS + Heartbeat
+  // URL final con token/rol
+  function buildWSUrl(h){ 
+    const base = wsOf(h);
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}role=panel&token=${encodeURIComponent(token||"")}`;
+  }
+
+  // ========= WS + Heartbeat =========
   let ws = null, manualClose = false, beat = null, retry = 0, appAliveTs = 0;
   let appSeen = false, hostIndex = 0, visTimer = null;
 
   function safeJSON(x){ try{ return JSON.parse(x); }catch{ return null; } }
   function send(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify(obj)); }catch{} } else { log("WS no conectado"); } }
+
   function startHeartbeat(){
     stopHeartbeat();
     beat = setInterval(() => {
@@ -140,14 +154,20 @@
   function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
   function connect(){
+    if (!HOSTS.length){ log("Configura el host en Ajustes."); return; }
+    if (!token){ log("Falta TOKEN. Ábrete Ajustes."); }
     if (ws && ws.readyState === 1) return;
+
     manualClose = false;
 
     const h = HOSTS[hostIndex % HOSTS.length];
-    const URL  = `${wsOf(h)}?role=panel&token=${encodeURIComponent(token||"")}`;
+    const url = buildWSUrl(h);
+
+    // mostrar (sin token) para no filtrar secreto
     wsu.textContent = wsOf(h);
 
-    try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
+    try { ws = new WebSocket(url); }
+    catch { log("URL inválida del WebSocket"); return; }
 
     ws.onopen = () => {
       retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
@@ -155,12 +175,16 @@
       send({ type:"cmd", payload:{ action:"status" } });
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       setPanelState(false); stopHeartbeat();
+      // 1008 o 1006 suele ser token inválido / upgrade fallido
+      if (ev.code === 1008 || ev.code === 1006) {
+        log("Cierre WS (¿token inválido o upgrade denegado?).");
+      }
       if (!manualClose){
         if (!appSeen) setAppState("err");
-        const backoff = Math.min(10000, 1000 * Math.pow(2, retry++));
-        hostIndex = (hostIndex + 1) % HOSTS.length;
+        const backoff = Math.min(10000, 1000 * Math.pow(2, Math.min(5,retry++)));
+        hostIndex = (hostIndex + 1) % HOSTS.length; // rota entre host y nip.io
         log(`Desconectado. Reintentando en ${Math.round(backoff/1000)}s… (host ${HOSTS[hostIndex]})`);
         setTimeout(connect, backoff);
       } else {
@@ -168,14 +192,14 @@
       }
     };
 
-    ws.onerror = () => { /* handled by onclose */ };
+    ws.onerror = () => { /* se maneja en close */ };
 
     ws.onmessage = (ev) => {
       const m = safeJSON(ev.data); if(!m) return;
       if (m.type) log(`Evento: ${m.type}`);
 
       if (m.type === "app_status"){
-        if (m.connected){ appSeen = true; appAliveTs = Date.now(); setAppState("ok"); }
+        if (m.payload && m.payload.connected){ appSeen = true; appAliveTs = Date.now(); setAppState("ok"); }
         else setAppState("err");
         return;
       }
@@ -196,7 +220,7 @@
     };
   }
 
-  // Botones
+  // ========= Controles =========
   $("#btn").onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
   $("#ping").onclick   = () => send({ type:"cmd", payload:{ action:"ping",   ts:Date.now() } });
   $("#start").onclick  = () => send({ type:"cmd", payload:{ action:"start"  } });
@@ -204,7 +228,7 @@
   $("#status").onclick = () => send({ type:"cmd", payload:{ action:"status" } });
   $("#clear").onclick  = () => { logEl.textContent=""; msg.textContent="Listo."; };
 
-  // Atajos de teclado
+  // Atajos
   window.addEventListener("keydown",(e)=>{
     const k = e.key.toLowerCase();
     if(k==="p") $("#ping").click();
@@ -213,7 +237,7 @@
     if(k==="a"){ e.preventDefault(); $("#openSettings").click(); }
   });
 
-  // Reconexión si cambia visibilidad (útil en móviles)
+  // Reintento al volver a la pestaña (útil en móviles)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible"){
       clearTimeout(visTimer);
@@ -225,7 +249,7 @@
   window.addEventListener("offline", () => { log("Sin conexión de red."); badgeUpdate(wsBadge, 'WS: <b>Desconectado</b>', 'err'); });
   window.addEventListener("online",  () => { log("Conexión de red restaurada."); if(!ws || ws.readyState!==1) connect(); });
 
-  // Modal ajustes
+  // ========= Modal Ajustes =========
   const dlg = $("#dlg");
   $("#openSettings").onclick = () => {
     const c = cfgGet();
@@ -237,24 +261,24 @@
   $("#btnSave").onclick = (e) => {
     e.preventDefault();
     token = $("#inToken").value.trim();
-    host  = $("#inHost").value.trim() || (location.host||"144.126.129.233");
+    host  = $("#inHost").value.trim() || (location.host||"");
     path  = $("#inPath").value.trim() || "/ws";
     cfgSet({ token, host, path });
-    // actualizar host list y preview
-    HOSTS.length = 0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
-    wsu.textContent = wsOf(host);
+    // reconstruye lista de hosts
+    HOSTS.length = 0;
+    if (host) HOSTS.push(host);
+    if (host && !/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+    wsu.textContent = wsOf(host || (location.host||""));
     dlg.close();
     if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
     setTimeout(connect, 200);
   };
   $("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
 
-  // Estado inicial
+  // ========= Estado inicial + Autoconectar =========
   setPanelState(false);
   setAppState("err");
-  wsu.textContent = wsOf(host);
-
-  // Autoconectar
+  wsu.textContent = host ? wsOf(host) : "(configura host en Ajustes)";
   connect();
 </script>
 </body>
