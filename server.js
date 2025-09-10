@@ -80,8 +80,8 @@ app.get("/healthz", (_req, res) => {
 
 /**
  * Wi-Fi/LAN: adb connect <ip:port> y lanza scrcpy -s <ip:port>
- * NOTA: en VPS “headless” instala xvfb y crea wrapper /usr/local/bin/scrcpy
- * para que corra con X virtual (xvfb-run -a).
+ * NOTA (VPS headless): instala xvfb y crea wrapper /usr/local/bin/scrcpy
+ * con `xvfb-run -a` para que scrcpy no requiera GUI.
  */
 app.post("/conectar-wifi", async (req, res) => {
   const ip   = String(req.body?.ip || "").trim();
@@ -135,7 +135,6 @@ app.post("/conectar", async (req, res) => {
     return res.status(400).json({ ok: false, error: "IP inválida" });
   }
   const port = Number(req.body?.port || 5555);
-  // Internamente reusamos la lógica de /conectar-wifi
   req.body = { ip, port };
   return app._router.handle(req, res, () => {}, "post", "/conectar-wifi");
 });
@@ -178,18 +177,30 @@ function onPanelConnect(ws) {
     try { msg = JSON.parse(String(raw)); } catch { return; }
     if (!msg) return;
 
-    // Comandos del panel → App
     if (msg.type === "cmd") {
-      if (appWS && appWS.readyState === WebSocket.OPEN) {
-        try { appWS.send(JSON.stringify(msg)); } catch {}
-      } else {
-        sendOK(ws, "error", { code: "app_not_connected" });
+      const action = String(msg?.payload?.action || "").toLowerCase();
+
+      // ✅ responder local SIEMPRE para status/ping
+      if (action === "status") {
+        return sendOK(ws, "status", {
+          online: !!appWS,
+          state: appWS ? "ready" : "idle",
+        });
       }
+      if (action === "ping") {
+        return sendOK(ws, "pong", { ts: Date.now() });
+      }
+
+      // start/stop/otros → requieren app conectada
+      if (!appWS || appWS.readyState !== WebSocket.OPEN) {
+        return sendOK(ws, "error", { code: "app_not_connected" });
+      }
+      try { appWS.send(JSON.stringify(msg)); } catch {}
       return;
     }
 
-    // Ping local (respuesta inmediata)
-    if (msg.type === "ping" || msg?.payload?.action === "ping") {
+    // Compat: si alguien manda {type:"ping"} sin payload
+    if (msg.type === "ping") {
       return sendOK(ws, "pong", { ts: Date.now() });
     }
   });
