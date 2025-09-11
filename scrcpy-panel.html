@@ -165,6 +165,7 @@ function connect(){
   wsu.textContent = wsOf(h);
 
   try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
+  ws.binaryType = "arraybuffer";   // 👈 habilita recepción de frames binarios
 
   ws.onopen = () => {
     retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
@@ -183,6 +184,12 @@ function connect(){
   ws.onerror = () => {};
 
   ws.onmessage = (ev) => {
+    // 👇 si llega binario (Annex-B), lo mandamos directo al decoder
+    if (ev.data instanceof ArrayBuffer) {
+      pushAnnexBFrame(new Uint8Array(ev.data));
+      return;
+    }
+
     // JSON o {type:"app_data", base64:"..."}
     const m = safeJSON(ev.data);
     if (!m) return;
