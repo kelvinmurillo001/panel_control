@@ -9,277 +9,338 @@
 <style>
   :root{--bg:#0b1220;--card:#131a2a;--b:#1f2a44;--muted:#9fb0d4;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--btn:#3a6ff8}
   *{box-sizing:border-box} html,body{height:100%}
-  body{margin:0;background:var(--bg);color:#e8eefc;font-family:system-ui,Segoe UI,Roboto,Arial;display:grid;place-items:center}
-  .card{width:min(680px,94vw);background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-  h1{margin:0 0 6px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)}
-  .row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  body{margin:0;background:var(--bg);color:#e8eefc;font-family:system-ui,Segoe UI,Roboto,Arial}
+  .layout{min-height:100%;display:grid;place-items:center}
+  .grid{display:grid;grid-template-columns:minmax(320px,620px) minmax(280px,56vw);gap:18px;align-items:start;padding:18px}
+  .card{background:var(--card);border:1px solid var(--b);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card h1{margin:0 0 6px;font-size:1.25rem} .mini{font-size:.9rem;color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#0c1426;border:1px solid #1b2747;color:var(--muted);font-size:.95rem}
-  .dot{width:10px;height:10px;border-radius:50%;background:#9aa7c7}
-  .ok{background:var(--ok)!important} .warn{background:var(--warn)!important} .err{background:var(--err)!important}
-  button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer;transition:transform .05s ease}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .ok{background:var(--ok)} .warn{background:var(--warn)} .err{background:var(--err)} .mut{background:#9aa7c7}
+  button{background:var(--btn);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;cursor:pointer;transition:transform .05s}
   button.secondary{background:#2a3a6a} button:disabled{opacity:.6;cursor:not-allowed}
   button.ghost{background:#0c1426;border:1px solid #1b2747}
   button:active{transform:translateY(1px)}
-  .foot{margin-top:12px;color:var(--muted);font-size:.9rem;min-height:1.2em}
-  .mini{font-size:.85rem;color:var(--muted)}
   code{background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
   pre{margin:10px 0 0;background:#0c1426;border:1px solid #1b2747;padding:10px;border-radius:10px;max-height:240px;overflow:auto;font-size:.9rem}
-  .kbd{font-family:ui-monospace, Menlo, Consolas, monospace;background:#0c1426;border:1px solid #1b2747;padding:2px 6px;border-radius:6px}
   dialog{border:1px solid var(--b);background:var(--card);color:#e8eefc;border-radius:16px;width:min(560px,92vw);padding:16px}
-  dialog::backdrop{background:rgba(0,0,0,.5)}
-  label{display:block;font-size:.9rem;color:var(--muted);margin:6px 0 4px}
+  dialog::backdrop{background:rgba(0,0,0,.5)} label{display:block;font-size:.9rem;color:var(--muted);margin:6px 0 4px}
   input[type="text"],input[type="password"]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #1b2747;background:#0b1220;color:#e8eefc}
+  /* Lienzo de video */
+  .stage{aspect-ratio:9/16;background:#000;border:1px solid #1b2747;border-radius:12px;overflow:hidden}
+  canvas{display:block;width:100%;height:100%;background:#000}
 </style>
 </head>
 <body>
-  <div class="card" role="region" aria-label="Panel de conexión única">
-    <div class="row" style="margin-bottom:10px">
-      <h1 style="margin:0">Conexión única</h1>
-      <div class="row" style="gap:8px">
-        <span class="pill" id="wsBadge">WS: <b id="st">Desconectado</b></span>
-        <span class="pill" id="appBadge">App: <b id="stApp">desconectada</b></span>
-        <button id="openSettings" class="ghost" aria-haspopup="dialog" title="Ajustes (A)">Ajustes</button>
+<div class="layout">
+  <div class="grid">
+
+    <!-- Panel -->
+    <div class="card" role="region" aria-label="Panel de conexión única">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <h1>Conexión única</h1>
+        <div class="row" style="gap:8px">
+          <span class="pill" id="wsBadge"><span class="dot mut"></span> WS: <b>Desconectado</b></span>
+          <span class="pill" id="appBadge"><span class="dot mut"></span> App: <b>desconectada</b></span>
+          <button id="openSettings" class="ghost" title="Ajustes (A)">Ajustes</button>
+        </div>
       </div>
+
+      <p class="mini">Servidor WS: <code id="wsu"></code></p>
+
+      <div class="row" style="gap:8px;margin:10px 0 6px">
+        <button id="btn" aria-label="Conectar">Conectar</button>
+        <button id="ping" class="secondary" disabled>Ping</button>
+        <button id="start" class="secondary" disabled>Start</button>
+        <button id="stop"  class="secondary" disabled>Stop</button>
+        <button id="status" class="secondary" disabled>Estado</button>
+        <button id="clear" class="ghost">Limpiar log</button>
+      </div>
+
+      <div class="mini" id="msg">Listo.</div>
+      <pre id="log" aria-live="polite"></pre>
     </div>
 
-    <p class="mini">Servidor WS: <code id="wsu"></code></p>
-
-    <div class="row" style="gap:8px;margin:10px 0 6px">
-      <button id="btn" aria-label="Conectar">Conectar</button>
-      <button id="ping" class="secondary" disabled>Ping <span class="kbd">P</span></button>
-      <button id="start" class="secondary" disabled>Start <span class="kbd">S</span></button>
-      <button id="stop"  class="secondary" disabled>Stop <span class="kbd">X</span></button>
-      <button id="status" class="secondary" disabled>Estado</button>
-      <button id="clear" class="ghost">Limpiar log</button>
+    <!-- Vista de video -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <h1 style="margin:0">Vista del dispositivo</h1>
+        <span class="mini" id="vinfo">—</span>
+      </div>
+      <div class="stage"><canvas id="view" width="360" height="640"></canvas></div>
+      <p class="mini" style="margin-top:8px">
+        Usa Chrome/Edge recientes (requiere <b>WebCodecs</b>).
+      </p>
     </div>
 
-    <div class="foot" id="msg">Listo.</div>
-    <pre id="log" aria-live="polite"></pre>
   </div>
+</div>
 
-  <!-- Modal Ajustes -->
-  <dialog id="dlg">
-    <form method="dialog">
-      <h3 style="margin:.2rem 0 .6rem">Ajustes de conexión</h3>
-      <label>TOKEN (Bearer)</label>
-      <input id="inToken" type="password" placeholder="Introduce tu TOKEN"/>
-      <div class="row" style="gap:12px;justify-content:stretch">
-        <div style="flex:1">
-          <label>Host (por defecto el actual)</label>
-          <input id="inHost" type="text" placeholder="ej: 144.126.129.233 o subdominio"/>
-        </div>
-        <div style="flex:1">
-          <label>Ruta WS</label>
-          <input id="inPath" type="text" value="/ws"/>
-        </div>
+<!-- Modal Ajustes -->
+<dialog id="dlg">
+  <form method="dialog">
+    <h3 style="margin:.2rem 0 .6rem">Ajustes de conexión</h3>
+    <label>TOKEN (Bearer)</label>
+    <input id="inToken" type="password" placeholder="Introduce tu TOKEN"/>
+    <div class="row" style="gap:12px;justify-content:stretch">
+      <div style="flex:1">
+        <label>Host (por defecto el actual)</label>
+        <input id="inHost" type="text" placeholder="ej: 144.126.129.233"/>
       </div>
-      <p class="mini">Los ajustes se guardan sólo en este navegador (localStorage).</p>
-      <div class="row" style="gap:8px;margin-top:10px">
-        <button id="btnSave">Guardar</button>
-        <button id="btnClose" class="ghost">Cerrar</button>
+      <div style="flex:1">
+        <label>Ruta WS</label>
+        <input id="inPath" type="text" value="/ws"/>
       </div>
-    </form>
-  </dialog>
+    </div>
+    <p class="mini">Se guarda en este navegador (localStorage).</p>
+    <div class="row" style="gap:8px;margin-top:10px">
+      <button id="btnSave">Guardar</button>
+      <button id="btnClose" class="ghost">Cerrar</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
-  // ========= Persistencia =========
-  const CFG_KEY = "kmez_panel_cfg_v1";
-  function cfgGet(){
-    const def = { token:"", host:(location.host||""), path:"/ws" };
-    try{ return Object.assign(def, JSON.parse(localStorage.getItem(CFG_KEY)||"{}")); }
-    catch{ return def; }
-  }
-  function cfgSet(v){ localStorage.setItem(CFG_KEY, JSON.stringify(v)); }
+/* ===== Persistencia ===== */
+const CFG_KEY = "kmez_panel_cfg_v2";
+function cfgGet(){
+  const def = { token:"", host:(location.host||"144.126.129.233"), path:"/ws" };
+  try{ return Object.assign(def, JSON.parse(localStorage.getItem(CFG_KEY)||"{}")); }
+  catch{ return def; }
+}
+function cfgSet(v){ localStorage.setItem(CFG_KEY, JSON.stringify(v)); }
 
-  // ========= Helpers UI =========
-  const $ = s => document.querySelector(s);
-  const msg = $("#msg"), btn = $("#btn"), ping = $("#ping"),
-        startBtn = $("#start"), stopBtn = $("#stop"), statusBtn = $("#status"),
-        wsu = $("#wsu"), logEl = $("#log"),
-        wsBadge = $("#wsBadge"), appBadge = $("#appBadge");
+/* ===== UI ===== */
+const $ = s => document.querySelector(s);
+const msg = $("#msg"), btn = $("#btn"), ping = $("#ping"),
+      startBtn = $("#start"), stopBtn = $("#stop"), statusBtn = $("#status"),
+      wsu = $("#wsu"), logEl = $("#log"),
+      wsBadge = $("#wsBadge"), appBadge = $("#appBadge"),
+      vinfo = $("#vinfo");
+function badgeUpdate(badge, text, cls){ badge.innerHTML = `<span class="dot ${cls}"></span> ${text}`; }
+function setPanelState(connected){
+  badgeUpdate(wsBadge, `WS: <b>${connected ? "Conectado" : "Desconectado"}</b>`, connected?"ok":"err");
+  btn.textContent = connected ? "Desconectar" : "Conectar";
+  ping.disabled = startBtn.disabled = stopBtn.disabled = statusBtn.disabled = !connected;
+}
+function setAppState(kind){
+  const txt = kind==="ok" ? "conectada" : (kind==="warn" ? "sin respuesta" : "desconectada");
+  badgeUpdate(appBadge, `App: <b>${txt}</b>`, kind==="ok"?"ok":(kind==="warn"?"warn":"err"));
+}
+function log(...args){
+  const line = args.map(a => typeof a==="string"?a:JSON.stringify(a)).join(" ");
+  logEl.textContent = `[${new Date().toLocaleTimeString()}] ${line}\n` + logEl.textContent;
+  msg.textContent = line;
+}
 
-  function badgeUpdate(badge, html, cls){
-    badge.innerHTML = `<span class="dot ${cls}" aria-hidden="true"></span> ${html}`;
-  }
-  function setPanelState(connected){
-    badgeUpdate(wsBadge, `WS: <b>${connected ? "Conectado" : "Desconectado"}</b>`, connected?"ok":"err");
-    btn.textContent = connected ? "Desconectar" : "Conectar";
-    ping.disabled = startBtn.disabled = stopBtn.disabled = statusBtn.disabled = !connected;
-  }
-  function setAppState(kind){ // ok | warn | err
-    const txt = kind==="ok" ? "conectada" : (kind==="warn" ? "sin respuesta" : "desconectada");
-    badgeUpdate(appBadge, `App: <b>${txt}</b>`, kind==="ok"?"ok":(kind==="warn"?"warn":"err"));
-  }
-  function log(...args){
-    const line = args.map(a => typeof a==="string"?a:JSON.stringify(a)).join(" ");
-    logEl.textContent = `[${new Date().toLocaleTimeString()}] ${line}\n` + logEl.textContent;
-    msg.textContent = line;
-  }
+/* ===== Config inicial ===== */
+let { token, host, path } = cfgGet();
+const HOSTS = [ host ];
+if (!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+const SCHEME = location.protocol === "https:" ? "wss" : "ws";
+const wsOf = (h) => `${SCHEME}://${h}${path || "/ws"}`;
 
-  // ========= Config inicial + fallback nip.io =========
-  let { token, host, path } = cfgGet();
-  host = host || (location.host || "");       // si vacío, el usuario lo pone en Ajustes
-  path = (path || "/ws").trim() || "/ws";
+/* ===== WS + Heartbeat ===== */
+let ws = null, manualClose = false, beat = null, retry = 0, appAliveTs = 0;
+let appSeen = false, hostIndex = 0, visTimer = null;
 
-  const HOSTS = [];
-  if (host) HOSTS.push(host);
-  if (host && !/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+function safeJSON(x){ try{ return JSON.parse(x); }catch{ return null; } }
+function send(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify(obj)); }catch{} } else { log("WS no conectado"); } }
+function startHeartbeat(){
+  stopHeartbeat();
+  beat = setInterval(() => {
+    send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
+    if (appSeen && Date.now() - appAliveTs > 45000) setAppState("warn");
+  }, 30000);
+}
+function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
-  const SCHEME = location.protocol === "https:" ? "wss" : "ws";
+function connect(){
+  if (ws && ws.readyState === 1) return;
+  manualClose = false;
 
-  // base sin query (para mostrar)
-  const wsOf = (h) => `${SCHEME}://${h}${path || "/ws"}`;
+  const h = HOSTS[hostIndex % HOSTS.length];
+  const URL  = `${wsOf(h)}?role=panel&token=${encodeURIComponent(token||"")}`;
+  wsu.textContent = wsOf(h);
 
-  // URL final con token/rol
-  function buildWSUrl(h){ 
-    const base = wsOf(h);
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}role=panel&token=${encodeURIComponent(token||"")}`;
-  }
+  try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
 
-  // ========= WS + Heartbeat =========
-  let ws = null, manualClose = false, beat = null, retry = 0, appAliveTs = 0;
-  let appSeen = false, hostIndex = 0, visTimer = null;
+  ws.onopen = () => {
+    retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
+    startHeartbeat(); send({ type:"cmd", payload:{ action:"status" } });
+  };
+  ws.onclose = () => {
+    setPanelState(false); stopHeartbeat();
+    if (!manualClose){
+      if (!appSeen) setAppState("err");
+      const backoff = Math.min(10000, 1000 * Math.pow(2, retry++));
+      hostIndex = (hostIndex + 1) % HOSTS.length;
+      log(`Desconectado. Reintentando en ${Math.round(backoff/1000)}s… (host ${HOSTS[hostIndex]})`);
+      setTimeout(connect, backoff);
+    } else { log("Desconectado."); }
+  };
+  ws.onerror = () => {};
 
-  function safeJSON(x){ try{ return JSON.parse(x); }catch{ return null; } }
-  function send(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify(obj)); }catch{} } else { log("WS no conectado"); } }
+  ws.onmessage = (ev) => {
+    // JSON o {type:"app_data", base64:"..."}
+    const m = safeJSON(ev.data);
+    if (!m) return;
 
-  function startHeartbeat(){
-    stopHeartbeat();
-    beat = setInterval(() => {
-      send({ type:"cmd", payload:{ action:"ping", ts:Date.now() } });
-      if (appSeen && Date.now() - appAliveTs > 45000) setAppState("warn");
-    }, 30000);
-  }
-  function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
+    if (m.type) log(`Evento: ${m.type}`);
 
-  function connect(){
-    if (!HOSTS.length){ log("Configura el host en Ajustes."); return; }
-    if (!token){ log("Falta TOKEN. Ábrete Ajustes."); }
-    if (ws && ws.readyState === 1) return;
-
-    manualClose = false;
-
-    const h = HOSTS[hostIndex % HOSTS.length];
-    const url = buildWSUrl(h);
-
-    // mostrar (sin token) para no filtrar secreto
-    wsu.textContent = wsOf(h);
-
-    try { ws = new WebSocket(url); }
-    catch { log("URL inválida del WebSocket"); return; }
-
-    ws.onopen = () => {
-      retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
-      startHeartbeat();
-      send({ type:"cmd", payload:{ action:"status" } });
-    };
-
-    ws.onclose = (ev) => {
-      setPanelState(false); stopHeartbeat();
-      // 1008 o 1006 suele ser token inválido / upgrade fallido
-      if (ev.code === 1008 || ev.code === 1006) {
-        log("Cierre WS (¿token inválido o upgrade denegado?).");
-      }
-      if (!manualClose){
-        if (!appSeen) setAppState("err");
-        const backoff = Math.min(10000, 1000 * Math.pow(2, Math.min(5,retry++)));
-        hostIndex = (hostIndex + 1) % HOSTS.length; // rota entre host y nip.io
-        log(`Desconectado. Reintentando en ${Math.round(backoff/1000)}s… (host ${HOSTS[hostIndex]})`);
-        setTimeout(connect, backoff);
-      } else {
-        log("Desconectado.");
-      }
-    };
-
-    ws.onerror = () => { /* se maneja en close */ };
-
-    ws.onmessage = (ev) => {
-      const m = safeJSON(ev.data); if(!m) return;
-      if (m.type) log(`Evento: ${m.type}`);
-
-      if (m.type === "app_status"){
-        if (m.payload && m.payload.connected){ appSeen = true; appAliveTs = Date.now(); setAppState("ok"); }
-        else setAppState("err");
-        return;
-      }
-      if (m.type === "pong"){
-        appSeen = true; appAliveTs = Date.now(); setAppState("ok"); log("Pong recibido");
-        return;
-      }
-      if (m.type === "status"){
-        const p = m.payload || {};
-        if (typeof p.online === "boolean"){
-          if (p.online){ appSeen = true; setAppState("ok"); appAliveTs = Date.now(); }
-          else setAppState("err");
-        }
-        if (p.state) log("Estado de la app: " + p.state);
-        return;
-      }
-      if (m.from === "device"){ log(`Device → ${m.type || "evento"}`); return; }
-    };
-  }
-
-  // ========= Controles =========
-  $("#btn").onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
-  $("#ping").onclick   = () => send({ type:"cmd", payload:{ action:"ping",   ts:Date.now() } });
-  $("#start").onclick  = () => send({ type:"cmd", payload:{ action:"start"  } });
-  $("#stop").onclick   = () => send({ type:"cmd", payload:{ action:"stop"   } });
-  $("#status").onclick = () => send({ type:"cmd", payload:{ action:"status" } });
-  $("#clear").onclick  = () => { logEl.textContent=""; msg.textContent="Listo."; };
-
-  // Atajos
-  window.addEventListener("keydown",(e)=>{
-    const k = e.key.toLowerCase();
-    if(k==="p") $("#ping").click();
-    if(k==="s") $("#start").click();
-    if(k==="x") $("#stop").click();
-    if(k==="a"){ e.preventDefault(); $("#openSettings").click(); }
-  });
-
-  // Reintento al volver a la pestaña (útil en móviles)
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible"){
-      clearTimeout(visTimer);
-      visTimer = setTimeout(() => { if (!ws || ws.readyState !== 1) connect(); }, 300);
+    if (m.type === "app_status"){
+      if (m.payload && m.payload.connected){ appSeen = true; appAliveTs = Date.now(); setAppState("ok"); }
+      else setAppState("err");
+      return;
     }
-  });
-
-  // Notifica offline/online del navegador
-  window.addEventListener("offline", () => { log("Sin conexión de red."); badgeUpdate(wsBadge, 'WS: <b>Desconectado</b>', 'err'); });
-  window.addEventListener("online",  () => { log("Conexión de red restaurada."); if(!ws || ws.readyState!==1) connect(); });
-
-  // ========= Modal Ajustes =========
-  const dlg = $("#dlg");
-  $("#openSettings").onclick = () => {
-    const c = cfgGet();
-    $("#inToken").value = c.token || "";
-    $("#inHost").value = c.host || (location.host||"");
-    $("#inPath").value = c.path || "/ws";
-    dlg.showModal();
+    if (m.type === "pong"){
+      appSeen = true; appAliveTs = Date.now(); setAppState("ok"); log("Pong recibido");
+      return;
+    }
+    if (m.type === "status"){
+      const p = m.payload || {};
+      if (typeof p.online === "boolean"){
+        if (p.online){ appSeen = true; setAppState("ok"); appAliveTs = Date.now(); }
+        else setAppState("err");
+      }
+      if (p.state) log("Estado de la app: " + p.state);
+      return;
+    }
+    if (m.type === "h264_config") {
+      const w = m.payload?.w|0, h = m.payload?.h|0;
+      const sps_b64 = m.payload?.sps_b64 || "";
+      const pps_b64 = m.payload?.pps_b64 || "";
+      if (sps_b64 && pps_b64) {
+        const sps = b64ToU8(sps_b64), pps = b64ToU8(pps_b64);
+        configureDecoderFromSpsPps(sps, pps, w, h);
+      }
+      return;
+    }
+    if (m.type === "app_data" && m.base64) {
+      const bytes = b64ToU8(m.base64);
+      pushAnnexBFrame(bytes);
+      return;
+    }
   };
-  $("#btnSave").onclick = (e) => {
-    e.preventDefault();
-    token = $("#inToken").value.trim();
-    host  = $("#inHost").value.trim() || (location.host||"");
-    path  = $("#inPath").value.trim() || "/ws";
-    cfgSet({ token, host, path });
-    // reconstruye lista de hosts
-    HOSTS.length = 0;
-    if (host) HOSTS.push(host);
-    if (host && !/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
-    wsu.textContent = wsOf(host || (location.host||""));
-    dlg.close();
-    if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
-    setTimeout(connect, 200);
-  };
-  $("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
+}
 
-  // ========= Estado inicial + Autoconectar =========
-  setPanelState(false);
-  setAppState("err");
-  wsu.textContent = host ? wsOf(host) : "(configura host en Ajustes)";
-  connect();
+/* ===== WebCodecs (H.264 Annex-B) ===== */
+const canvas = $("#view");
+const ctx2d = canvas.getContext("2d");
+let decoder = null;
+let configured = false;
+let ts = 0;                 // µs
+const frameDur = 1e6/30;
+let dropCount = 0;
+
+function b64ToU8(s){ const b=atob(s); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
+function hex2(n){ return n.toString(16).padStart(2,"0"); }
+
+function buildAvcC(sps, pps){
+  const profile = sps[1], compat = sps[2], level = sps[3];
+  const len = 7 + 2 + sps.length + 1 + 2 + pps.length;
+  const out = new Uint8Array(len);
+  let p = 0;
+  out[p++] = 1; out[p++] = profile; out[p++] = compat; out[p++] = level;
+  out[p++] = 0xFF; out[p++] = 0xE1;
+  out[p++] = (sps.length>>>8)&0xFF; out[p++] = sps.length&0xFF; out.set(sps, p); p+=sps.length;
+  out[p++] = 1; out[p++] = (pps.length>>>8)&0xFF; out[p++] = pps.length&0xFF; out.set(pps, p);
+  const codec = `avc1.${hex2(profile)}${hex2(compat)}${hex2(level)}`;
+  return { avcc: out, codec };
+}
+
+function configureDecoderFromSpsPps(sps, pps, w, h){
+  if (!("VideoDecoder" in window)) { log("WebCodecs no disponible."); return; }
+  const { avcc, codec } = buildAvcC(sps, pps);
+  if (!decoder) {
+    decoder = new VideoDecoder({
+      output: frame => {
+        try {
+          if (canvas.width !== frame.codedWidth || canvas.height !== frame.codedHeight) {
+            canvas.width = frame.codedWidth; canvas.height = frame.codedHeight;
+          }
+          ctx2d.drawImage(frame, 0, 0, canvas.width, canvas.height);
+          frame.close();
+        } catch(e){}
+      },
+      error: e => { configured=false; log("Decoder error:", e.message||e); }
+    });
+  } else if (decoder.state === "closed") {
+    decoder = null; return configureDecoderFromSpsPps(sps, pps, w, h);
+  }
+  try {
+    decoder.configure({
+      codec,
+      description: avcc.buffer,
+      hardwareAcceleration: "prefer-hardware",
+      optimizeForLatency: true
+    });
+    configured = true; dropCount = 0;
+    vinfo.textContent = `${w||canvas.width}×${h||canvas.height} • ${codec}`;
+    log("Decoder configurado:", codec);
+  } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
+}
+
+function findNalTypeAnnexB(bytes){
+  for (let i=0;i+4<=bytes.length;i++){
+    if (bytes[i]===0 && bytes[i+1]===0 && ((bytes[i+2]===1) || (bytes[i+2]===0 && bytes[i+3]===1))){
+      const off = bytes[i+2]===1 ? i+3 : i+4;
+      return bytes[off] & 0x1F; // 5=IDR
+    }
+  }
+  return 1;
+}
+
+function pushAnnexBFrame(bytes){
+  if (!configured || !decoder) return;
+  if (decoder.decodeQueueSize > 6) { dropCount++; if (dropCount % 10 === 0) log(`drop frames: ${dropCount}`); return; }
+  const nalType = findNalTypeAnnexB(bytes);
+  const chunk = new EncodedVideoChunk({ type: (nalType===5 ? "key" : "delta"), timestamp: (ts+=frameDur), data: bytes });
+  try { decoder.decode(chunk); } catch(e){}
+}
+
+/* ===== Botones ===== */
+$("#btn").onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
+$("#ping").onclick   = () => send({ type:"cmd", payload:{ action:"ping",   ts:Date.now() } });
+$("#start").onclick  = () => send({ type:"cmd", payload:{ action:"start"  } });
+$("#stop").onclick   = () => send({ type:"cmd", payload:{ action:"stop"   } });
+$("#status").onclick = () => send({ type:"cmd", payload:{ action:"status" } });
+$("#clear").onclick  = () => { logEl.textContent=""; msg.textContent="Listo."; };
+
+/* ===== Atajos + reconexión ===== */
+window.addEventListener("keydown",(e)=>{ const k = e.key.toLowerCase(); if(k==="p") $("#ping").click(); if(k==="s") $("#start").click(); if(k==="x") $("#stop").click(); if(k==="a"){ e.preventDefault(); $("#openSettings").click(); }});
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ clearTimeout(visTimer); visTimer = setTimeout(() => { if (!ws || ws.readyState !== 1) connect(); }, 300); }});
+window.addEventListener("offline", () => { log("Sin conexión de red."); badgeUpdate(wsBadge, 'WS: <b>Desconectado</b>', 'err'); });
+window.addEventListener("online",  () => { log("Conexión restaurada."); if(!ws || ws.readyState!==1) connect(); });
+
+/* ===== Modal Ajustes ===== */
+const dlg = $("#dlg");
+$("#openSettings").onclick = () => {
+  const c = cfgGet();
+  $("#inToken").value = c.token || "";
+  $("#inHost").value = c.host || (location.host||"");
+  $("#inPath").value = c.path || "/ws";
+  dlg.showModal();
+};
+$("#btnSave").onclick = (e) => {
+  e.preventDefault();
+  token = $("#inToken").value.trim();
+  host  = $("#inHost").value.trim() || (location.host||"144.126.129.233");
+  path  = $("#inPath").value.trim() || "/ws";
+  cfgSet({ token, host, path });
+  HOSTS.length = 0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+  wsu.textContent = wsOf(host);
+  dlg.close();
+  if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
+  setTimeout(connect, 200);
+};
+$("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
+
+/* ===== Estado inicial ===== */
+setPanelState(false); setAppState("err");
+wsu.textContent = wsOf(host);
+connect();
 </script>
 </body>
 </html>
