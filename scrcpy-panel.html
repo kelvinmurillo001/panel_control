@@ -36,7 +36,7 @@
     color:#9fb0d4; font-size:.95rem; background:transparent; pointer-events:none
   }
 
-  /* ===== Visor flotante ===== */
+  /* Visor flotante */
   .floatbox{
     position:fixed;left:16px;bottom:16px;width:360px;height:640px;
     background:var(--card);border:1px solid var(--b);border-radius:14px;
@@ -94,7 +94,7 @@
         <h1 style="margin:0">Vista del dispositivo</h1>
         <span class="mini" id="vinfo">—</span>
       </div>
-      <div class="stage">
+      <div class="stage" id="stage">
         <canvas id="view" width="360" height="640"></canvas>
         <div id="viewOverlay" class="view-overlay">Esperando video…</div>
       </div>
@@ -177,8 +177,25 @@ function log(...args){
 
 /* ===== Config inicial ===== */
 let { token, host, path } = cfgGet();
-const HOSTS = [ host ];
-if (!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+
+function isIPv4(h){ return /^\d{1,3}(\.\d{1,3}){3}$/.test(h||""); }
+function buildHostList(h){
+  const base = String(h||"").trim();
+  if (!base) return [];
+  const lower = base.toLowerCase();
+  const list = [base];
+  // Si ya está en nip.io o sslip.io no añadimos nada
+  if (lower.endsWith(".nip.io") || lower.endsWith(".sslip.io")) {
+    return list;
+  }
+  // Si es una IP, añadimos dominios mágicos válidos
+  if (isIPv4(base)) {
+    list.push(`${base}.nip.io`, `${base}.sslip.io`);
+  }
+  return [...new Set(list)];
+}
+
+let HOSTS = buildHostList(host);
 const SCHEME = location.protocol === "https:" ? "wss" : "ws";
 const wsOf = (h) => `${SCHEME}://${h}${path || "/ws"}`;
 
@@ -199,7 +216,7 @@ function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
 /* ===== Visor flotante ===== */
 const viewCanvas = $("#view");
-const stage = viewCanvas.parentElement;
+const stage = $("#stage");
 const overlay = $("#viewOverlay");
 const floatBox = $("#floatBox");
 const floatBody = $("#floatBody");
@@ -207,6 +224,7 @@ const btnFull = $("#btnFull");
 const btnClose = $("#btnClose");
 const dragHandle = $("#dragHandle");
 let popped = false;
+
 function ensureViewerOpen(){
   if (!popped){
     floatBody.appendChild(viewCanvas);
@@ -221,6 +239,9 @@ btnFull.addEventListener("click", async ()=>{
   try{ if(!document.fullscreenElement) await floatBox.requestFullscreen(); else await document.exitFullscreen(); }
   catch(e){ log("Fullscreen:", e.message||e); }
 });
+// abrir visor con doble clic sobre la vista embebida
+stage.addEventListener("dblclick", ensureViewerOpen);
+
 // arrastrar
 let drag=null;
 dragHandle.addEventListener("mousedown",(e)=>{ if(!popped) return; drag={dx:e.clientX-floatBox.offsetLeft, dy:e.clientY-floatBox.offsetTop}; document.body.style.userSelect='none'; });
@@ -236,7 +257,7 @@ function connect(){
   wsu.textContent = wsOf(h);
 
   try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
-  ws.binaryType = "arraybuffer";   // 👈 habilita recepción de frames binarios
+  ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
     retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
@@ -255,7 +276,7 @@ function connect(){
   ws.onerror = () => {};
 
   ws.onmessage = (ev) => {
-    // 👇 si llega binario (Annex-B), lo mandamos al decoder y abrimos visor
+    // Annex-B binario → decodificar y abrir visor
     if (ev.data instanceof ArrayBuffer) {
       ensureViewerOpen();
       pushAnnexBFrame(new Uint8Array(ev.data));
@@ -285,7 +306,7 @@ function connect(){
       }
       if (p.state){
         log("Estado de la app: " + p.state);
-        if (/starting|running/i.test(p.state)) ensureViewerOpen(); // auto-abrir al arrancar
+        if (/starting|running/i.test(p.state)) ensureViewerOpen();
       }
       return;
     }
@@ -363,12 +384,12 @@ function configureDecoderFromSpsPps(sps, pps, w, h){
     configured = true; dropCount = 0;
     vinfo.textContent = `${w||canvas.width}×${h||canvas.height} • ${codec}`;
     overlay.textContent = "";
-    ensureViewerOpen();               // abre el visor al configurar
+    ensureViewerOpen();
     log("Decoder configurado:", codec);
   } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
 }
 
-// separa un buffer Annex-B en NALs y devuelve objetos {t:tipo, d:Uint8Array}
+// separa Annex-B en NALs
 function splitAnnexB(u8){
   const out=[]; let i=0, start=-1;
   const isStart=(k)=> u8[k]===0 && u8[k+1]===0 && ((u8[k+2]===1) || (u8[k+2]===0 && u8[k+3]===1));
@@ -382,7 +403,6 @@ function splitAnnexB(u8){
   if(start>=0) out.push(u8.slice(start));
   return out.map(n => ({t:n[0]&0x1F, d:n}));
 }
-
 function maybeConfigureFromAnnexB(bytes){
   const nals = splitAnnexB(bytes);
   for (const n of nals){
@@ -393,13 +413,11 @@ function maybeConfigureFromAnnexB(bytes){
     configureDecoderFromSpsPps(lastSps, lastPps);
   }
 }
-
 function findNalTypeAnnexB(bytes){
   const nals = splitAnnexB(bytes);
   if (!nals.length) return 1;
   return nals[0].t; // 5=IDR
 }
-
 function pushAnnexBFrame(bytes){
   if (!configured){
     maybeConfigureFromAnnexB(bytes);
@@ -440,8 +458,11 @@ $("#btnSave").onclick = (e) => {
   host  = $("#inHost").value.trim() || (location.host||"144.126.129.233");
   path  = $("#inPath").value.trim() || "/ws";
   cfgSet({ token, host, path });
-  HOSTS.length = 0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
-  wsu.textContent = wsOf(host);
+
+  const hosts = buildHostList(host);
+  HOSTS.length = 0; HOSTS.push(...hosts);
+
+  wsu.textContent = wsOf(HOSTS[0] || host);
   dlg.close();
   if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
   setTimeout(connect, 200);
@@ -450,7 +471,7 @@ $("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
 
 /* ===== Estado inicial ===== */
 setPanelState(false); setAppState("err");
-wsu.textContent = wsOf(host);
+wsu.textContent = wsOf(HOSTS[0] || host);
 connect();
 </script>
 </body>
