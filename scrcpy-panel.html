@@ -384,14 +384,12 @@ function trySplitAVCC(u8, lenSize){
   return nals;
 }
 function splitAVCCAuto(u8){
-  // intenta 4,3,2,1 bytes de longitud
   return trySplitAVCC(u8,4) || trySplitAVCC(u8,3) || trySplitAVCC(u8,2) || trySplitAVCC(u8,1);
 }
 function avccToAnnexB(u8){
   const nals = splitAVCCAuto(u8); if(!nals) return null;
   const parts=[];
   for(const n of nals){ parts.push(new Uint8Array([0,0,0,1])); parts.push(n.d); }
-  // concatena
   let total=0; for(const p of parts) total+=p.length;
   const out=new Uint8Array(total); let o=0; for(const p of parts){ out.set(p,o); o+=p.length; }
   return {bytes:out, nals};
@@ -415,7 +413,6 @@ function pushFrameGeneric(bytes){
     if (conv){ knownFormat = knownFormat || "avcc"; nals = conv.nals; data = conv.bytes; }
     else { overlay.textContent = "Formato de frame desconocido"; return; }
   }
-  // Configurar si aún no hay decoder
   if (!configured){ maybeConfigureFromNals(nals); if (!configured){ overlay.textContent = "Recibiendo… (esperando SPS/PPS)"; } }
   if (!configured) return;
 

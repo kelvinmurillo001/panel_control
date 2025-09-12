@@ -1,4 +1,4 @@
-// 📁 server.js
+// 📁 panel de control/server.js
 "use strict";
 
 /* =========================
@@ -128,15 +128,31 @@ app.post("/conectar-usb", async (_req, res) => {
   }
 });
 
-/** Backcompat: /conectar { ip } → /conectar-wifi (puerto por defecto 5555) */
+/** Backcompat: /conectar { ip } → equivalente a /conectar-wifi con puerto 5555 */
 app.post("/conectar", async (req, res) => {
-  const ip = String(req.body?.ip || "").trim();
+  const ip   = String(req.body?.ip || "").trim();
+  const port = 5555;
+
   if (!ip || !isValidIPv4(ip)) {
     return res.status(400).json({ ok: false, error: "IP inválida" });
   }
-  const port = Number(req.body?.port || 5555);
-  req.body = { ip, port };
-  return app._router.handle(req, res, () => {}, "post", "/conectar-wifi");
+
+  const target = `${ip}:${port}`;
+  const adb = await run("adb", ["connect", target]);
+  if (!adb.ok && !/already\s+connected/i.test(adb.stdout + adb.stderr)) {
+    return res.status(500).json({
+      ok: false,
+      step: "adb_connect",
+      error: adb.stderr || adb.stdout || "Fallo adb connect",
+    });
+  }
+  try {
+    const sc = spawn("scrcpy", ["-s", target], { stdio: "ignore", detached: true });
+    sc.unref();
+  } catch (e) {
+    return res.status(500).json({ ok: false, step: "scrcpy_spawn", error: String(e) });
+  }
+  return res.json({ ok: true, message: `Conectando a ${target} y lanzando scrcpy...` });
 });
 
 /* =========================
@@ -156,9 +172,12 @@ function sendOK(ws, type, payload = {}) {
 function deny(socket) {
   try { socket.destroy(); } catch {}
 }
-function broadcastToPanels(obj) {
+function broadcastToPanelsJSON(obj) {
   const s = JSON.stringify(obj);
   for (const p of panels) if (p.readyState === WebSocket.OPEN) p.send(s);
+}
+function broadcastToPanelsBinary(buf) {
+  for (const p of panels) if (p.readyState === WebSocket.OPEN) p.send(buf);
 }
 
 // Conexión de Panel
@@ -221,22 +240,25 @@ function onAppConnect(ws) {
   ws.on("pong", () => (ws.isAlive = true));
 
   // Avisar a todos los paneles que la app se conectó
-  broadcastToPanels({ type: "app_status", payload: { connected: true } });
+  broadcastToPanelsJSON({ type: "app_status", payload: { connected: true } });
 
-  ws.on("message", (buf) => {
-    // Si la app envía JSON, lo republicamos tal cual; si es binario, lo envolvemos
-    const str = buf.toString();
+  // ⬇️ Reenviar binario como binario y JSON como JSON
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) {
+      return broadcastToPanelsBinary(data);
+    }
+    const text = data.toString();
     try {
-      const asJson = JSON.parse(str);
-      broadcastToPanels(asJson);
+      const msg = JSON.parse(text);
+      broadcastToPanelsJSON(msg);
     } catch {
-      broadcastToPanels({ type: "app_data", base64: buf.toString("base64") });
+      // ignora texto no-JSON
     }
   });
 
   ws.on("close", () => {
     appWS = null;
-    broadcastToPanels({ type: "app_status", payload: { connected: false } });
+    broadcastToPanelsJSON({ type: "app_status", payload: { connected: false } });
   });
 }
 
