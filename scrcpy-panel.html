@@ -44,15 +44,9 @@
     resize:both;overflow:hidden;z-index:9999
   }
   .floatbox.hidden{display:none}
-  .floatbox .bar{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:8px 10px;background:#0c1426;border-bottom:1px solid #1b2747;cursor:move
-  }
+  .floatbox .bar{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#0c1426;border-bottom:1px solid #1b2747;cursor:move}
   .floatbox .title{font-size:.95rem;color:var(--muted)}
-  .floatbox .btns button{
-    background:#2a3a6a;color:#fff;border:0;border-radius:8px;
-    padding:6px 10px;font-size:.9rem;cursor:pointer
-  }
+  .floatbox .btns button{background:#2a3a6a;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-size:.9rem;cursor:pointer}
   .floatbox .btns button+button{margin-left:6px}
   .floatbox .body{flex:1;background:#000;display:flex}
   .floatbox .body canvas{width:100%;height:100%;display:block}
@@ -61,8 +55,6 @@
 <body>
 <div class="layout">
   <div class="grid">
-
-    <!-- Panel -->
     <div class="card" role="region" aria-label="Panel de conexión única">
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h1>Conexión única</h1>
@@ -88,21 +80,18 @@
       <pre id="log" aria-live="polite"></pre>
     </div>
 
-    <!-- Vista de video (embebida) -->
+    <!-- Vista embebida -->
     <div class="card">
       <div class="row" style="justify-content:space-between;margin-bottom:8px">
         <h1 style="margin:0">Vista del dispositivo</h1>
         <span class="mini" id="vinfo">—</span>
       </div>
-      <div class="stage" id="stage">
+      <div class="stage">
         <canvas id="view" width="360" height="640"></canvas>
         <div id="viewOverlay" class="view-overlay">Esperando video…</div>
       </div>
-      <p class="mini" style="margin-top:8px">
-        Usa Chrome/Edge recientes (requiere <b>WebCodecs</b>).
-      </p>
+      <p class="mini" style="margin-top:8px">Usa Chrome/Edge recientes (requiere <b>WebCodecs</b>).</p>
     </div>
-
   </div>
 </div>
 
@@ -177,25 +166,8 @@ function log(...args){
 
 /* ===== Config inicial ===== */
 let { token, host, path } = cfgGet();
-
-function isIPv4(h){ return /^\d{1,3}(\.\d{1,3}){3}$/.test(h||""); }
-function buildHostList(h){
-  const base = String(h||"").trim();
-  if (!base) return [];
-  const lower = base.toLowerCase();
-  const list = [base];
-  // Si ya está en nip.io o sslip.io no añadimos nada
-  if (lower.endsWith(".nip.io") || lower.endsWith(".sslip.io")) {
-    return list;
-  }
-  // Si es una IP, añadimos dominios mágicos válidos
-  if (isIPv4(base)) {
-    list.push(`${base}.nip.io`, `${base}.sslip.io`);
-  }
-  return [...new Set(list)];
-}
-
-let HOSTS = buildHostList(host);
+const HOSTS = [ host ];
+if (!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
 const SCHEME = location.protocol === "https:" ? "wss" : "ws";
 const wsOf = (h) => `${SCHEME}://${h}${path || "/ws"}`;
 
@@ -216,7 +188,7 @@ function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
 /* ===== Visor flotante ===== */
 const viewCanvas = $("#view");
-const stage = $("#stage");
+const stage = viewCanvas.parentElement;
 const overlay = $("#viewOverlay");
 const floatBox = $("#floatBox");
 const floatBody = $("#floatBody");
@@ -224,7 +196,6 @@ const btnFull = $("#btnFull");
 const btnClose = $("#btnClose");
 const dragHandle = $("#dragHandle");
 let popped = false;
-
 function ensureViewerOpen(){
   if (!popped){
     floatBody.appendChild(viewCanvas);
@@ -232,16 +203,8 @@ function ensureViewerOpen(){
     popped = true;
   }
 }
-btnClose.addEventListener("click", ()=>{
-  if (popped){ stage.appendChild(viewCanvas); floatBox.classList.add("hidden"); popped=false; }
-});
-btnFull.addEventListener("click", async ()=>{
-  try{ if(!document.fullscreenElement) await floatBox.requestFullscreen(); else await document.exitFullscreen(); }
-  catch(e){ log("Fullscreen:", e.message||e); }
-});
-// abrir visor con doble clic sobre la vista embebida
-stage.addEventListener("dblclick", ensureViewerOpen);
-
+btnClose.addEventListener("click", ()=>{ if (popped){ stage.appendChild(viewCanvas); floatBox.classList.add("hidden"); popped=false; }});
+btnFull.addEventListener("click", async ()=>{ try{ if(!document.fullscreenElement) await floatBox.requestFullscreen(); else await document.exitFullscreen(); } catch(e){ log("Fullscreen:", e.message||e); }});
 // arrastrar
 let drag=null;
 dragHandle.addEventListener("mousedown",(e)=>{ if(!popped) return; drag={dx:e.clientX-floatBox.offsetLeft, dy:e.clientY-floatBox.offsetTop}; document.body.style.userSelect='none'; });
@@ -276,14 +239,14 @@ function connect(){
   ws.onerror = () => {};
 
   ws.onmessage = (ev) => {
-    // Annex-B binario → decodificar y abrir visor
+    // Binario -> frames de video
     if (ev.data instanceof ArrayBuffer) {
       ensureViewerOpen();
-      pushAnnexBFrame(new Uint8Array(ev.data));
+      pushFrameGeneric(new Uint8Array(ev.data));
       return;
     }
 
-    // JSON o {type:"app_data", base64:"..."}
+    // Mensajes JSON o {type:"app_data", base64:"..."}
     const m = safeJSON(ev.data);
     if (!m) return;
 
@@ -322,14 +285,13 @@ function connect(){
     }
     if (m.type === "app_data" && m.base64) {
       ensureViewerOpen();
-      const bytes = b64ToU8(m.base64);
-      pushAnnexBFrame(bytes);
+      pushFrameGeneric(b64ToU8(m.base64));
       return;
     }
   };
 }
 
-/* ===== WebCodecs (H.264 Annex-B) ===== */
+/* ===== WebCodecs (H.264) ===== */
 const canvas = $("#view");
 const ctx2d = canvas.getContext("2d");
 let decoder = null;
@@ -338,10 +300,12 @@ let lastSps = null, lastPps = null;
 let ts = 0;                 // µs
 const frameDur = 1e6/30;
 let dropCount = 0;
+let knownFormat = null;     // "annexb" | "avcc"
 
 function b64ToU8(s){ const b=atob(s); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
 function hex2(n){ return n.toString(16).padStart(2,"0"); }
 
+/* --- Configuración del decoder a partir de SPS/PPS --- */
 function buildAvcC(sps, pps){
   const profile = sps[1], compat = sps[2], level = sps[3];
   const len = 7 + 2 + sps.length + 1 + 2 + pps.length;
@@ -382,50 +346,82 @@ function configureDecoderFromSpsPps(sps, pps, w, h){
       optimizeForLatency: true
     });
     configured = true; dropCount = 0;
-    vinfo.textContent = `${w||canvas.width}×${h||canvas.height} • ${codec}`;
+    vinfo.textContent = `${w||canvas.width}×${h||canvas.height} • ${codec} • ${knownFormat||"?"}`;
     overlay.textContent = "";
     ensureViewerOpen();
-    log("Decoder configurado:", codec);
+    log("Decoder configurado:", codec, "formato:", knownFormat||"?");
   } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
 }
 
-// separa Annex-B en NALs
+/* --- Utilidades Annex-B y AVCC --- */
+function isAnnexB(u8){
+  for(let i=0;i+3<u8.length;i++){
+    if (u8[i]===0 && u8[i+1]===0 && (u8[i+2]===1 || (u8[i+2]===0 && u8[i+3]===1))) return true;
+  }
+  return false;
+}
 function splitAnnexB(u8){
   const out=[]; let i=0, start=-1;
   const isStart=(k)=> u8[k]===0 && u8[k+1]===0 && ((u8[k+2]===1) || (u8[k+2]===0 && u8[k+3]===1));
   while(i < u8.length-3){
     if(isStart(i)){
       if(start>=0) out.push(u8.slice(start, i));
-      i += (u8[i+2]===1?3:4);
-      start = i;
+      i += (u8[i+2]===1?3:4); start = i;
     } else i++;
   }
   if(start>=0) out.push(u8.slice(start));
   return out.map(n => ({t:n[0]&0x1F, d:n}));
 }
-function maybeConfigureFromAnnexB(bytes){
-  const nals = splitAnnexB(bytes);
-  for (const n of nals){
-    if (n.t === 7) lastSps = n.d;
-    else if (n.t === 8) lastPps = n.d;
+function trySplitAVCC(u8, lenSize){
+  const nals=[]; let p=0; const L=lenSize;
+  while(p+L<=u8.length){
+    let n=0; for(let i=0;i<L;i++){ n=(n<<8)|u8[p+i]; }
+    p+=L;
+    if(n<=0 || p+n>u8.length) return null;
+    nals.push({t:(u8[p]&0x1F), d:u8.slice(p, p+n)}); p+=n;
   }
-  if (!configured && lastSps && lastPps){
-    configureDecoderFromSpsPps(lastSps, lastPps);
-  }
+  if (p!==u8.length) return null;
+  return nals;
 }
-function findNalTypeAnnexB(bytes){
-  const nals = splitAnnexB(bytes);
-  if (!nals.length) return 1;
-  return nals[0].t; // 5=IDR
+function splitAVCCAuto(u8){
+  // intenta 4,3,2,1 bytes de longitud
+  return trySplitAVCC(u8,4) || trySplitAVCC(u8,3) || trySplitAVCC(u8,2) || trySplitAVCC(u8,1);
 }
-function pushAnnexBFrame(bytes){
-  if (!configured){
-    maybeConfigureFromAnnexB(bytes);
-    if (!configured){ overlay.textContent = "Recibiendo… (esperando SPS/PPS)"; return; }
+function avccToAnnexB(u8){
+  const nals = splitAVCCAuto(u8); if(!nals) return null;
+  const parts=[];
+  for(const n of nals){ parts.push(new Uint8Array([0,0,0,1])); parts.push(n.d); }
+  // concatena
+  let total=0; for(const p of parts) total+=p.length;
+  const out=new Uint8Array(total); let o=0; for(const p of parts){ out.set(p,o); o+=p.length; }
+  return {bytes:out, nals};
+}
+
+/* --- Pipeline de entrada genérico --- */
+function maybeConfigureFromNals(nals){
+  for (const n of nals){ if (n.t===7) lastSps=n.d; else if (n.t===8) lastPps=n.d; }
+  if (!configured && lastSps && lastPps) configureDecoderFromSpsPps(lastSps, lastPps);
+}
+function findNalTypeFromNals(nals){ return nals && nals.length ? nals[0].t : 1; }
+
+function pushFrameGeneric(bytes){
+  let nals=null, data=null;
+  if (isAnnexB(bytes)){
+    knownFormat = knownFormat || "annexb";
+    nals = splitAnnexB(bytes);
+    data = bytes;
+  } else {
+    const conv = avccToAnnexB(bytes);
+    if (conv){ knownFormat = knownFormat || "avcc"; nals = conv.nals; data = conv.bytes; }
+    else { overlay.textContent = "Formato de frame desconocido"; return; }
   }
+  // Configurar si aún no hay decoder
+  if (!configured){ maybeConfigureFromNals(nals); if (!configured){ overlay.textContent = "Recibiendo… (esperando SPS/PPS)"; } }
+  if (!configured) return;
+
   if (decoder.decodeQueueSize > 6) { dropCount++; if (dropCount % 10 === 0) log(`drop frames: ${dropCount}`); return; }
-  const nalType = findNalTypeAnnexB(bytes);
-  const chunk = new EncodedVideoChunk({ type: (nalType===5 ? "key" : "delta"), timestamp: (ts+=frameDur), data: bytes });
+  const nalType = findNalTypeFromNals(nals);
+  const chunk = new EncodedVideoChunk({ type: (nalType===5 ? "key" : "delta"), timestamp: (ts+=frameDur), data });
   try { decoder.decode(chunk); overlay.textContent=""; } catch(e){}
 }
 
@@ -458,11 +454,8 @@ $("#btnSave").onclick = (e) => {
   host  = $("#inHost").value.trim() || (location.host||"144.126.129.233");
   path  = $("#inPath").value.trim() || "/ws";
   cfgSet({ token, host, path });
-
-  const hosts = buildHostList(host);
-  HOSTS.length = 0; HOSTS.push(...hosts);
-
-  wsu.textContent = wsOf(HOSTS[0] || host);
+  HOSTS.length = 0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
+  wsu.textContent = wsOf(host);
   dlg.close();
   if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
   setTimeout(connect, 200);
@@ -471,7 +464,7 @@ $("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
 
 /* ===== Estado inicial ===== */
 setPanelState(false); setAppState("err");
-wsu.textContent = wsOf(HOSTS[0] || host);
+wsu.textContent = wsOf(host);
 connect();
 </script>
 </body>
