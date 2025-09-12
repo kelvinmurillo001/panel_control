@@ -27,9 +27,35 @@
   dialog{border:1px solid var(--b);background:var(--card);color:#e8eefc;border-radius:16px;width:min(560px,92vw);padding:16px}
   dialog::backdrop{background:rgba(0,0,0,.5)} label{display:block;font-size:.9rem;color:var(--muted);margin:6px 0 4px}
   input[type="text"],input[type="password"]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #1b2747;background:#0b1220;color:#e8eefc}
+
   /* Lienzo de video */
-  .stage{aspect-ratio:9/16;background:#000;border:1px solid #1b2747;border-radius:12px;overflow:hidden}
+  .stage{position:relative;aspect-ratio:9/16;background:#000;border:1px solid #1b2747;border-radius:12px;overflow:hidden}
   canvas{display:block;width:100%;height:100%;background:#000}
+  .view-overlay{
+    position:absolute; inset:0; display:grid; place-items:center;
+    color:#9fb0d4; font-size:.95rem; background:transparent; pointer-events:none
+  }
+
+  /* ===== Visor flotante ===== */
+  .floatbox{
+    position:fixed;left:16px;bottom:16px;width:360px;height:640px;
+    background:var(--card);border:1px solid var(--b);border-radius:14px;
+    box-shadow:0 20px 60px rgba(0,0,0,.45);display:flex;flex-direction:column;
+    resize:both;overflow:hidden;z-index:9999
+  }
+  .floatbox.hidden{display:none}
+  .floatbox .bar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:8px 10px;background:#0c1426;border-bottom:1px solid #1b2747;cursor:move
+  }
+  .floatbox .title{font-size:.95rem;color:var(--muted)}
+  .floatbox .btns button{
+    background:#2a3a6a;color:#fff;border:0;border-radius:8px;
+    padding:6px 10px;font-size:.9rem;cursor:pointer
+  }
+  .floatbox .btns button+button{margin-left:6px}
+  .floatbox .body{flex:1;background:#000;display:flex}
+  .floatbox .body canvas{width:100%;height:100%;display:block}
 </style>
 </head>
 <body>
@@ -62,19 +88,34 @@
       <pre id="log" aria-live="polite"></pre>
     </div>
 
-    <!-- Vista de video -->
+    <!-- Vista de video (embebida) -->
     <div class="card">
       <div class="row" style="justify-content:space-between;margin-bottom:8px">
         <h1 style="margin:0">Vista del dispositivo</h1>
         <span class="mini" id="vinfo">—</span>
       </div>
-      <div class="stage"><canvas id="view" width="360" height="640"></canvas></div>
+      <div class="stage">
+        <canvas id="view" width="360" height="640"></canvas>
+        <div id="viewOverlay" class="view-overlay">Esperando video…</div>
+      </div>
       <p class="mini" style="margin-top:8px">
         Usa Chrome/Edge recientes (requiere <b>WebCodecs</b>).
       </p>
     </div>
 
   </div>
+</div>
+
+<!-- Visor flotante -->
+<div id="floatBox" class="floatbox hidden" role="dialog" aria-label="Visor flotante">
+  <div id="dragHandle" class="bar">
+    <div class="title">Vista del dispositivo</div>
+    <div class="btns">
+      <button id="btnFull">Pantalla completa</button>
+      <button id="btnClose">Cerrar</button>
+    </div>
+  </div>
+  <div id="floatBody" class="body"></div>
 </div>
 
 <!-- Modal Ajustes -->
@@ -156,6 +197,36 @@ function startHeartbeat(){
 }
 function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
+/* ===== Visor flotante ===== */
+const viewCanvas = $("#view");
+const stage = viewCanvas.parentElement;
+const overlay = $("#viewOverlay");
+const floatBox = $("#floatBox");
+const floatBody = $("#floatBody");
+const btnFull = $("#btnFull");
+const btnClose = $("#btnClose");
+const dragHandle = $("#dragHandle");
+let popped = false;
+function ensureViewerOpen(){
+  if (!popped){
+    floatBody.appendChild(viewCanvas);
+    floatBox.classList.remove("hidden");
+    popped = true;
+  }
+}
+btnClose.addEventListener("click", ()=>{
+  if (popped){ stage.appendChild(viewCanvas); floatBox.classList.add("hidden"); popped=false; }
+});
+btnFull.addEventListener("click", async ()=>{
+  try{ if(!document.fullscreenElement) await floatBox.requestFullscreen(); else await document.exitFullscreen(); }
+  catch(e){ log("Fullscreen:", e.message||e); }
+});
+// arrastrar
+let drag=null;
+dragHandle.addEventListener("mousedown",(e)=>{ if(!popped) return; drag={dx:e.clientX-floatBox.offsetLeft, dy:e.clientY-floatBox.offsetTop}; document.body.style.userSelect='none'; });
+window.addEventListener("mousemove",(e)=>{ if(!drag) return; floatBox.style.left=(e.clientX-drag.dx)+'px'; floatBox.style.top=(e.clientY-drag.dy)+'px'; });
+window.addEventListener("mouseup",()=>{ drag=null; document.body.style.userSelect=''; });
+
 function connect(){
   if (ws && ws.readyState === 1) return;
   manualClose = false;
@@ -184,8 +255,9 @@ function connect(){
   ws.onerror = () => {};
 
   ws.onmessage = (ev) => {
-    // 👇 si llega binario (Annex-B), lo mandamos directo al decoder
+    // 👇 si llega binario (Annex-B), lo mandamos al decoder y abrimos visor
     if (ev.data instanceof ArrayBuffer) {
+      ensureViewerOpen();
       pushAnnexBFrame(new Uint8Array(ev.data));
       return;
     }
@@ -211,7 +283,10 @@ function connect(){
         if (p.online){ appSeen = true; setAppState("ok"); appAliveTs = Date.now(); }
         else setAppState("err");
       }
-      if (p.state) log("Estado de la app: " + p.state);
+      if (p.state){
+        log("Estado de la app: " + p.state);
+        if (/starting|running/i.test(p.state)) ensureViewerOpen(); // auto-abrir al arrancar
+      }
       return;
     }
     if (m.type === "h264_config") {
@@ -225,6 +300,7 @@ function connect(){
       return;
     }
     if (m.type === "app_data" && m.base64) {
+      ensureViewerOpen();
       const bytes = b64ToU8(m.base64);
       pushAnnexBFrame(bytes);
       return;
@@ -237,6 +313,7 @@ const canvas = $("#view");
 const ctx2d = canvas.getContext("2d");
 let decoder = null;
 let configured = false;
+let lastSps = null, lastPps = null;
 let ts = 0;                 // µs
 const frameDur = 1e6/30;
 let dropCount = 0;
@@ -285,26 +362,53 @@ function configureDecoderFromSpsPps(sps, pps, w, h){
     });
     configured = true; dropCount = 0;
     vinfo.textContent = `${w||canvas.width}×${h||canvas.height} • ${codec}`;
+    overlay.textContent = "";
+    ensureViewerOpen();               // abre el visor al configurar
     log("Decoder configurado:", codec);
   } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
 }
 
-function findNalTypeAnnexB(bytes){
-  for (let i=0;i+4<=bytes.length;i++){
-    if (bytes[i]===0 && bytes[i+1]===0 && ((bytes[i+2]===1) || (bytes[i+2]===0 && bytes[i+3]===1))){
-      const off = bytes[i+2]===1 ? i+3 : i+4;
-      return bytes[off] & 0x1F; // 5=IDR
-    }
+// separa un buffer Annex-B en NALs y devuelve objetos {t:tipo, d:Uint8Array}
+function splitAnnexB(u8){
+  const out=[]; let i=0, start=-1;
+  const isStart=(k)=> u8[k]===0 && u8[k+1]===0 && ((u8[k+2]===1) || (u8[k+2]===0 && u8[k+3]===1));
+  while(i < u8.length-3){
+    if(isStart(i)){
+      if(start>=0) out.push(u8.slice(start, i));
+      i += (u8[i+2]===1?3:4);
+      start = i;
+    } else i++;
   }
-  return 1;
+  if(start>=0) out.push(u8.slice(start));
+  return out.map(n => ({t:n[0]&0x1F, d:n}));
+}
+
+function maybeConfigureFromAnnexB(bytes){
+  const nals = splitAnnexB(bytes);
+  for (const n of nals){
+    if (n.t === 7) lastSps = n.d;
+    else if (n.t === 8) lastPps = n.d;
+  }
+  if (!configured && lastSps && lastPps){
+    configureDecoderFromSpsPps(lastSps, lastPps);
+  }
+}
+
+function findNalTypeAnnexB(bytes){
+  const nals = splitAnnexB(bytes);
+  if (!nals.length) return 1;
+  return nals[0].t; // 5=IDR
 }
 
 function pushAnnexBFrame(bytes){
-  if (!configured || !decoder) return;
+  if (!configured){
+    maybeConfigureFromAnnexB(bytes);
+    if (!configured){ overlay.textContent = "Recibiendo… (esperando SPS/PPS)"; return; }
+  }
   if (decoder.decodeQueueSize > 6) { dropCount++; if (dropCount % 10 === 0) log(`drop frames: ${dropCount}`); return; }
   const nalType = findNalTypeAnnexB(bytes);
   const chunk = new EncodedVideoChunk({ type: (nalType===5 ? "key" : "delta"), timestamp: (ts+=frameDur), data: bytes });
-  try { decoder.decode(chunk); } catch(e){}
+  try { decoder.decode(chunk); overlay.textContent=""; } catch(e){}
 }
 
 /* ===== Botones ===== */
