@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
@@ -205,31 +205,42 @@ function ensureViewerOpen(){
 }
 btnClose.addEventListener("click", ()=>{ if (popped){ stage.appendChild(viewCanvas); floatBox.classList.add("hidden"); popped=false; }});
 btnFull.addEventListener("click", async ()=>{ try{ if(!document.fullscreenElement) await floatBox.requestFullscreen(); else await document.exitFullscreen(); } catch(e){ log("Fullscreen:", e.message||e); }});
-// arrastrar
 let drag=null;
 dragHandle.addEventListener("mousedown",(e)=>{ if(!popped) return; drag={dx:e.clientX-floatBox.offsetLeft, dy:e.clientY-floatBox.offsetTop}; document.body.style.userSelect='none'; });
 window.addEventListener("mousemove",(e)=>{ if(!drag) return; floatBox.style.left=(e.clientX-drag.dx)+'px'; floatBox.style.top=(e.clientY-drag.dy)+'px'; });
 window.addEventListener("mouseup",()=>{ drag=null; document.body.style.userSelect=''; });
 
-function resetDecoder(){ // ★ limpieza completa
+function resetDecoder(){
   try { if (decoder && decoder.state !== "closed") decoder.close(); } catch {}
   decoder = null; configured = false; lastSps = lastPps = null; knownFormat = null;
   overlay.textContent = "Esperando video…";
 }
 
+/* ===== FIX TOKEN ROBUSTO ===== */
 function connect(){
   if (ws && ws.readyState === 1) return;
   manualClose = false;
 
   const h = HOSTS[hostIndex % HOSTS.length];
-  const URL  = `${wsOf(h)}?role=panel`;                      // ★ sin token en query
+
+  // Token: subprotocolo si es RFC7230 "token"; si no, va en query
+  let URL = `${wsOf(h)}?role=panel`;
+  let protocols = ["panel"];
+  const TK = (token || "").trim();
+  const TOKEN_OK = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(TK);
+  if (!TOKEN_OK && TK) {
+    URL += `&token=${encodeURIComponent(TK)}`;
+  } else if (TK) {
+    protocols.push(TK);
+  }
+
   wsu.textContent = wsOf(h);
 
-  try { 
-    ws = new WebSocket(URL, ["panel", token||""]);           // ★ token en subprotocolo
-  } catch { 
-    log("URL inválida del WebSocket"); 
-    return; 
+  try {
+    ws = new WebSocket(URL, protocols);
+  } catch {
+    log("URL inválida del WebSocket");
+    return;
   }
   ws.binaryType = "arraybuffer";
 
@@ -238,11 +249,11 @@ function connect(){
     startHeartbeat(); send({ type:"cmd", payload:{ action:"status" } });
   };
   ws.onclose = () => {
-    setPanelState(false); stopHeartbeat(); resetDecoder();    // ★ limpieza al cerrar
+    setPanelState(false); stopHeartbeat(); resetDecoder();
     if (!manualClose){
       if (!appSeen) setAppState("err");
       const base = Math.min(10000, 1000 * Math.pow(2, Math.min(6, retry++)));
-      const jitter = Math.floor(Math.random()*300);           // ★ pequeño jitter
+      const jitter = Math.floor(Math.random()*300);
       hostIndex = (hostIndex + 1) % HOSTS.length;
       log(`Desconectado. Reintentando en ${Math.round((base+jitter)/1000)}s… (host ${HOSTS[hostIndex]})`);
       setTimeout(connect, base + jitter);
@@ -251,14 +262,11 @@ function connect(){
   ws.onerror = () => {};
 
   ws.onmessage = (ev) => {
-    // Binario -> frames de video
     if (ev.data instanceof ArrayBuffer) {
       ensureViewerOpen();
       pushFrameGeneric(new Uint8Array(ev.data));
       return;
     }
-
-    // Mensajes JSON o {type:"app_data", base64:"..."}
     const m = safeJSON(ev.data);
     if (!m) return;
 
@@ -309,15 +317,14 @@ const ctx2d = canvas.getContext("2d");
 let decoder = null;
 let configured = false;
 let lastSps = null, lastPps = null;
-let ts = 0;                 // µs
+let ts = 0;
 const frameDur = 1e6/30;
 let dropCount = 0;
-let knownFormat = null;     // "annexb" | "avcc"
+let knownFormat = null;
 
 function b64ToU8(s){ const b=atob(s); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
 function hex2(n){ return n.toString(16).padStart(2,"0"); }
 
-/* --- Configuración del decoder a partir de SPS/PPS --- */
 function buildAvcC(sps, pps){
   const profile = sps[1], compat = sps[2], level = sps[3];
   const len = 7 + 2 + sps.length + 1 + 2 + pps.length;
@@ -365,7 +372,6 @@ function configureDecoderFromSpsPps(sps, pps, w, h){
   } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
 }
 
-/* --- Utilidades Annex-B y AVCC --- */
 function isAnnexB(u8){
   for(let i=0;i+3<u8.length;i++){
     if (u8[i]===0 && u8[i+1]===0 && (u8[i+2]===1 || (u8[i+2]===0 && u8[i+3]===1))) return true;
@@ -407,7 +413,6 @@ function avccToAnnexB(u8){
   return {bytes:out, nals};
 }
 
-/* --- Pipeline de entrada genérico --- */
 function maybeConfigureFromNals(nals){
   for (const n of nals){ if (n.t===7) lastSps=n.d; else if (n.t===8) lastPps=n.d; }
   if (!configured && lastSps && lastPps) configureDecoderFromSpsPps(lastSps, lastPps);
