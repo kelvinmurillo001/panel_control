@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
@@ -211,15 +211,26 @@ dragHandle.addEventListener("mousedown",(e)=>{ if(!popped) return; drag={dx:e.cl
 window.addEventListener("mousemove",(e)=>{ if(!drag) return; floatBox.style.left=(e.clientX-drag.dx)+'px'; floatBox.style.top=(e.clientY-drag.dy)+'px'; });
 window.addEventListener("mouseup",()=>{ drag=null; document.body.style.userSelect=''; });
 
+function resetDecoder(){ // ★ limpieza completa
+  try { if (decoder && decoder.state !== "closed") decoder.close(); } catch {}
+  decoder = null; configured = false; lastSps = lastPps = null; knownFormat = null;
+  overlay.textContent = "Esperando video…";
+}
+
 function connect(){
   if (ws && ws.readyState === 1) return;
   manualClose = false;
 
   const h = HOSTS[hostIndex % HOSTS.length];
-  const URL  = `${wsOf(h)}?role=panel&token=${encodeURIComponent(token||"")}`;
+  const URL  = `${wsOf(h)}?role=panel`;                      // ★ sin token en query
   wsu.textContent = wsOf(h);
 
-  try { ws = new WebSocket(URL); } catch { log("URL inválida del WebSocket"); return; }
+  try { 
+    ws = new WebSocket(URL, ["panel", token||""]);           // ★ token en subprotocolo
+  } catch { 
+    log("URL inválida del WebSocket"); 
+    return; 
+  }
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
@@ -227,13 +238,14 @@ function connect(){
     startHeartbeat(); send({ type:"cmd", payload:{ action:"status" } });
   };
   ws.onclose = () => {
-    setPanelState(false); stopHeartbeat();
+    setPanelState(false); stopHeartbeat(); resetDecoder();    // ★ limpieza al cerrar
     if (!manualClose){
       if (!appSeen) setAppState("err");
-      const backoff = Math.min(10000, 1000 * Math.pow(2, retry++));
+      const base = Math.min(10000, 1000 * Math.pow(2, Math.min(6, retry++)));
+      const jitter = Math.floor(Math.random()*300);           // ★ pequeño jitter
       hostIndex = (hostIndex + 1) % HOSTS.length;
-      log(`Desconectado. Reintentando en ${Math.round(backoff/1000)}s… (host ${HOSTS[hostIndex]})`);
-      setTimeout(connect, backoff);
+      log(`Desconectado. Reintentando en ${Math.round((base+jitter)/1000)}s… (host ${HOSTS[hostIndex]})`);
+      setTimeout(connect, base + jitter);
     } else { log("Desconectado."); }
   };
   ws.onerror = () => {};
