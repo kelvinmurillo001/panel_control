@@ -216,14 +216,15 @@ function resetDecoder(){
   overlay.textContent = "Esperando video…";
 }
 
-/* ===== FIX TOKEN ROBUSTO ===== */
+/* ===== Conexión WS (token robusto) ===== */
 function connect(){
   if (ws && ws.readyState === 1) return;
   manualClose = false;
 
   const h = HOSTS[hostIndex % HOSTS.length];
 
-  // Token: subprotocolo si es RFC7230 "token"; si no, va en query
+  // Si el token es un RFC7230 "token" (sin espacios), lo mandamos como subprotocolo;
+  // si tiene espacios u otros, lo pasamos por query (?token=...); si está vacío, no se envía.
   let URL = `${wsOf(h)}?role=panel`;
   let protocols = ["panel"];
   const TK = (token || "").trim();
@@ -317,10 +318,10 @@ const ctx2d = canvas.getContext("2d");
 let decoder = null;
 let configured = false;
 let lastSps = null, lastPps = null;
-let ts = 0;
+let ts = 0;                 // µs
 const frameDur = 1e6/30;
 let dropCount = 0;
-let knownFormat = null;
+let knownFormat = null;     // "annexb" | "avcc"
 
 function b64ToU8(s){ const b=atob(s); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
 function hex2(n){ return n.toString(16).padStart(2,"0"); }
@@ -372,6 +373,7 @@ function configureDecoderFromSpsPps(sps, pps, w, h){
   } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
 }
 
+/* --- Utilidades Annex-B y AVCC --- */
 function isAnnexB(u8){
   for(let i=0;i+3<u8.length;i++){
     if (u8[i]===0 && u8[i+1]===0 && (u8[i+2]===1 || (u8[i+2]===0 && u8[i+3]===1))) return true;
@@ -413,6 +415,7 @@ function avccToAnnexB(u8){
   return {bytes:out, nals};
 }
 
+/* --- Pipeline genérico --- */
 function maybeConfigureFromNals(nals){
   for (const n of nals){ if (n.t===7) lastSps=n.d; else if (n.t===8) lastPps=n.d; }
   if (!configured && lastSps && lastPps) configureDecoderFromSpsPps(lastSps, lastPps);
