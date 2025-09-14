@@ -79,7 +79,7 @@ app.get("/healthz", (_req, res) => {
   res.json({ ok: true, ts: Date.now(), version: "1.0.0" });
 });
 
-/* ====== Endpoints opcionales ====== */
+/* ====== Endpoints ====== */
 app.post("/conectar-wifi", requireAuth, async (req, res) => {
   const ip   = String(req.body?.ip || "").trim();
   const port = Number(req.body?.port || 5555);
@@ -158,7 +158,7 @@ function onAppConnect(ws) {
 wss.on("connection", (ws) => { if (ws._role === "app") return onAppConnect(ws); return onPanelConnect(ws); });
 
 server.on("upgrade", (request, socket, head) => {
-  const { pathname, query } = url.parse(request.url, true);
+  const { pathname } = url.parse(request.url, true);
   if (pathname !== "/ws") return deny(socket);
 
   const origin = String(request.headers.origin || "");
@@ -168,11 +168,10 @@ server.on("upgrade", (request, socket, head) => {
   const protos = sec.split(",").map(s => s.trim()).filter(Boolean);
   const roleFromProto  = (protos[0] || "panel").toLowerCase();
   const tokenFromProto = protos[1] || "";
-  const tokenFromQuery = (query?.token || "").toString();
-  const okToken = (tokenFromProto && tokenFromProto === TOKEN) || (tokenFromQuery && tokenFromQuery === TOKEN);
 
-  if (!okToken) {
-    console.error("[WS DENY] Token inválido:", tokenFromProto || tokenFromQuery);
+  // ✅ Solo aceptar token vía protocolo
+  if (!tokenFromProto || tokenFromProto !== TOKEN) {
+    console.error("[WS DENY] Token inválido:", tokenFromProto);
     return deny(socket);
   }
 
