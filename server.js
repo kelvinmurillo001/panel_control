@@ -1,4 +1,3 @@
-// 📁 panel_control/server.js (PROD en VPS)
 "use strict";
 
 const express   = require("express");
@@ -33,12 +32,21 @@ app.use(express.json());
 app.use(express.static(STATIC_DIR));
 
 /* ====== Panel ====== */
+const panelAtRoot = path.join(__dirname, "scrcpy-panel.html");
+const panelInPub  = path.join(STATIC_DIR, "scrcpy-panel.html");
+
+// raíz /
 app.get("/", (req, res, next) => {
-  const panelAtRoot = path.join(__dirname, "scrcpy-panel.html");
-  const panelInPub  = path.join(STATIC_DIR, "scrcpy-panel.html");
   if (fs.existsSync(panelInPub)) return res.sendFile(panelInPub);
   if (fs.existsSync(panelAtRoot)) return res.sendFile(panelAtRoot);
   return next();
+});
+
+// ruta explícita /scrcpy-panel.html
+app.get("/scrcpy-panel.html", (req, res, next) => {
+  if (fs.existsSync(panelInPub)) return res.sendFile(panelInPub);
+  if (fs.existsSync(panelAtRoot)) return res.sendFile(panelAtRoot);
+  return res.status(404).send("scrcpy-panel.html no encontrado");
 });
 
 /* ====== Utils ====== */
