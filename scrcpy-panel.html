@@ -1,4 +1,4 @@
-<!DOCTYPE html>   
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
@@ -105,7 +105,7 @@
 ================================= */
 const CFG_KEY = "kmez_panel_cfg_v2";
 function cfgGet(){
-  const def = { token:"KMEZ123456789TOKEN", host:(location.host||"144.126.129.233"), path:"/ws" };
+  const def = { token:"", host:(location.host||"144.126.129.233"), path:"/ws" };
   try{ return Object.assign(def, JSON.parse(localStorage.getItem(CFG_KEY)||"{}")); }
   catch{ return def; }
 }
@@ -158,12 +158,6 @@ function startHeartbeat(){
 function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
 /* ==============================
-   VIDEO (igual que antes)
-   … (se mantiene tu lógica de WebCodecs + MSE)
-================================= */
-// ⬆️ Todo el bloque de video queda igual, lo recorté por espacio pero lo mantienes igual que el tuyo.
-
-/* ==============================
    BOTONES
 ================================= */
 $("#btn").onclick    = () => { if (ws && ws.readyState === 1){ manualClose = true; try{ ws.close(1000,"manual"); }catch{} } else { connect(); } };
@@ -179,36 +173,35 @@ $("#reset").onclick  = () => { if(ws) try{ ws.close(1000,"manual reset"); }catch
 ================================= */
 const dlg=$("#dlg");
 $("#openSettings").onclick=()=>{ const c=cfgGet(); $("#inToken").value=c.token||""; $("#inHost").value=c.host||(location.host||""); $("#inPath").value=c.path||"/ws"; dlg.showModal(); };
-$("#btnSave").onclick=(e)=>{ e.preventDefault(); token=$("#inToken").value.trim() || "KMEZ123456789TOKEN"; host=$("#inHost").value.trim()||(location.host||"144.126.129.233"); path=$("#inPath").value.trim()||"/ws"; cfgSet({token,host,path}); HOSTS.length=0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`); wsu.textContent=wsOf(host); dlg.close(); if(ws&&ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} } setTimeout(connect,200); };
+$("#btnSave").onclick=(e)=>{ e.preventDefault(); token=$("#inToken").value.trim(); host=$("#inHost").value.trim()||(location.host||"144.126.129.233"); path=$("#inPath").value.trim()||"/ws"; cfgSet({token,host,path}); HOSTS.length=0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`); wsu.textContent=wsOf(host); dlg.close(); if(ws&&ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} } setTimeout(connect,200); };
 $("#btnClose").onclick=(e)=>{ e.preventDefault(); dlg.close(); };
 
 /* ==============================
-   CONEXIÓN WS
+   CONEXIÓN WS (solo protocolo con token)
 ================================= */
 function connect(){
   if (ws && ws.readyState === 1) return;
   manualClose = false;
   const h = HOSTS[hostIndex % HOSTS.length];
-  const TK = (token || "KMEZ123456789TOKEN").trim();
-  let URL = `${wsOf(h)}?role=panel`;
-  if (TK) URL += `&token=${encodeURIComponent(TK)}`;
-  const protocols = ["panel"]; if (TK) protocols.push(TK);
+  const TK = (token || "").trim();
+
+  let URL = `${wsOf(h)}?role=panel`;   // solo role en query
+  const protocols = ["panel"];         // token via protocolo
+  if (TK) protocols.push(TK);
+
   wsu.textContent = wsOf(h);
   try { ws = new WebSocket(URL, protocols); }
   catch (e) { log("URL inválida del WebSocket:", e.message||e); return; }
+  
   ws.binaryType = "arraybuffer";
   ws.onopen = () => { retry=0; setPanelState(true); log("✅ Conectado al relay ("+h+") con token:", TK ? "***" : "(vacío)"); startHeartbeat(); send({ type:"cmd", payload:{ action:"status" } }); };
-  ws.onclose = (ev) => { setPanelState(false); stopHeartbeat(); resetDecoder(); if (!manualClose){ if (!appSeen) setAppState("err"); const base=Math.min(10000,1000*Math.pow(2,Math.min(6,retry++))); const jitter=Math.floor(Math.random()*300); hostIndex=(hostIndex+1)%HOSTS.length; log(`Desconectado (${ev.code||0}). Reintentando en ${Math.round((base+jitter)/1000)}s… (host ${HOSTS[hostIndex]})`); setTimeout(connect, base+jitter); } else { log("Desconectado manualmente."); } };
-  ws.onerror = (ev) => { log("⚠️ Error WS (onerror)"); };
+  ws.onclose = (ev) => { setPanelState(false); stopHeartbeat(); if (!manualClose){ if (!appSeen) setAppState("err"); const base=Math.min(10000,1000*Math.pow(2,Math.min(6,retry++))); const jitter=Math.floor(Math.random()*300); hostIndex=(hostIndex+1)%HOSTS.length; log(`Desconectado (${ev.code||0}). Reintentando en ${Math.round((base+jitter)/1000)}s… (host ${HOSTS[hostIndex]})`); setTimeout(connect, base+jitter); } else { log("Desconectado manualmente."); } };
+  ws.onerror = () => { log("⚠️ Error WS (onerror)"); };
   ws.onmessage = (ev) => {
-    if (ev.data instanceof ArrayBuffer) { pushFrameGeneric(new Uint8Array(ev.data)); return; }
-    const m = safeJSON(ev.data); if (!m) return;
-    if (m.type) log(`Evento: ${m.type}`);
-    if (m.type === "app_status"){ if (m.payload?.connected){ appSeen=true; appAliveTs=Date.now(); setAppState("ok"); } else setAppState("err"); return; }
-    if (m.type === "pong"){ appSeen=true; appAliveTs=Date.now(); setAppState("ok"); log("Pong recibido"); return; }
-    if (m.type === "status"){ const p=m.payload||{}; if(typeof p.online==="boolean"){ if(p.online){ appSeen=true; setAppState("ok"); appAliveTs=Date.now(); } else setAppState("err"); } if(p.state){ log("Estado de la app: " + p.state); } return; }
-    if (m.type === "h264_config"){ const w=m.payload?.w|0,h=m.payload?.h|0; const sps_b64=m.payload?.sps_b64||"", pps_b64=m.payload?.pps_b64||""; if(sps_b64&&pps_b64){ const sps=b64ToU8(sps_b64), pps=b64ToU8(pps_b64); configureDecoderFromSpsPps(sps,pps,w,h); } return; }
-    if (m.type === "app_data" && m.base64){ pushFrameGeneric(b64ToU8(m.base64)); return; }
+    const m = safeJSON(ev.data);
+    if (m?.type === "app_status"){ if (m.payload?.connected){ appSeen=true; appAliveTs=Date.now(); setAppState("ok"); } else setAppState("err"); }
+    if (m?.type === "pong"){ appSeen=true; appAliveTs=Date.now(); setAppState("ok"); log("Pong recibido"); }
+    if (m?.type === "status"){ const p=m.payload||{}; if(typeof p.online==="boolean"){ if(p.online){ appSeen=true; setAppState("ok"); appAliveTs=Date.now(); } else setAppState("err"); } if(p.state){ log("Estado de la app: " + p.state); } }
   };
 }
 
