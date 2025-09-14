@@ -27,7 +27,6 @@
   dialog{border:1px solid var(--b);background:var(--card);color:#e8eefc;border-radius:16px;width:min(560px,92vw);padding:16px}
   dialog::backdrop{background:rgba(0,0,0,.5)} label{display:block;font-size:.9rem;color:var(--muted);margin:6px 0 4px}
   input[type="text"],input[type="password"]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #1b2747;background:#0b1220;color:#e8eefc}
-
   .stage{position:relative;aspect-ratio:9/16;background:#000;border:1px solid #1b2747;border-radius:12px;overflow:hidden}
   canvas,video{display:block;width:100%;height:100%;background:#000}
   .view-overlay{position:absolute; inset:0; display:grid; place-items:center; color:#9fb0d4; font-size:.95rem; background:transparent; pointer-events:none}
@@ -185,8 +184,8 @@ function connect(){
   const h = HOSTS[hostIndex % HOSTS.length];
   const TK = (token || "").trim();
 
-  let URL = `${wsOf(h)}?role=panel`;   // solo role en query
-  const protocols = ["panel"];         // token via protocolo
+  let URL = `${wsOf(h)}?role=panel`;   // ✅ solo role en query
+  const protocols = ["panel"];         // ✅ token via protocolo
   if (TK) protocols.push(TK);
 
   wsu.textContent = wsOf(h);
