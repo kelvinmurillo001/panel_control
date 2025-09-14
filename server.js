@@ -1,5 +1,7 @@
 "use strict";
 
+require("dotenv").config(); // 🔑 Cargar variables de entorno desde .env
+
 const express   = require("express");
 const cors      = require("cors");
 const path      = require("path");
@@ -11,10 +13,13 @@ const fs        = require("fs");
 
 const app = express();
 
+/* ====== CONFIG ====== */
 const PORT           = Number(process.env.PORT || 5501);
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || "*";
 const STATIC_DIR     = path.join(__dirname, "public");
 const TOKEN          = process.env.TOKEN || "CAMBIA_ESTE_TOKEN_SUPER_SEGURO_2025";
+
+console.log("🔑 TOKEN cargado:", TOKEN === "CAMBIA_ESTE_TOKEN_SUPER_SEGURO_2025" ? "(default, revisa tu .env)" : TOKEN);
 
 /* ====== Middleware ====== */
 app.use(
@@ -35,14 +40,12 @@ app.use(express.static(STATIC_DIR));
 const panelAtRoot = path.join(__dirname, "scrcpy-panel.html");
 const panelInPub  = path.join(STATIC_DIR, "scrcpy-panel.html");
 
-// raíz /
 app.get("/", (req, res, next) => {
   if (fs.existsSync(panelInPub)) return res.sendFile(panelInPub);
   if (fs.existsSync(panelAtRoot)) return res.sendFile(panelAtRoot);
   return next();
 });
 
-// ruta explícita /scrcpy-panel.html
 app.get("/scrcpy-panel.html", (req, res, next) => {
   if (fs.existsSync(panelInPub)) return res.sendFile(panelInPub);
   if (fs.existsSync(panelAtRoot)) return res.sendFile(panelAtRoot);
