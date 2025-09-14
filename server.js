@@ -19,7 +19,11 @@ const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || "*";
 const STATIC_DIR     = path.join(__dirname, "public");
 const TOKEN          = process.env.TOKEN || "CAMBIA_ESTE_TOKEN_SUPER_SEGURO_2025";
 
-console.log("🔑 TOKEN cargado:", TOKEN === "CAMBIA_ESTE_TOKEN_SUPER_SEGURO_2025" ? "(default, revisa tu .env)" : TOKEN);
+// ⚠️ Evita loguear tokens reales en producción
+console.log(
+  "🔑 TOKEN cargado:",
+  TOKEN === "CAMBIA_ESTE_TOKEN_SUPER_SEGURO_2025" ? "(default, revisa tu .env)" : "(token personalizado)"
+);
 
 /* ====== Middleware ====== */
 app.use(
@@ -92,14 +96,25 @@ app.post("/conectar-wifi", requireAuth, async (req, res) => {
     console.error("[ADB ERROR]", adb.stderr || adb.stdout);
     return res.status(500).json({ ok: false, step: "adb_connect", error: adb.stderr || adb.stdout || "Fallo adb connect" });
   }
-  try { const sc = spawn("scrcpy", ["-s", target], { stdio: "ignore", detached: true }); sc.unref(); }
-  catch (e) { console.error("[SCRCPY ERROR]", e); return res.status(500).json({ ok: false, step: "scrcpy_spawn", error: String(e) }); }
+  try {
+    const sc = spawn("scrcpy", ["-s", target], { stdio: "ignore", detached: true });
+    sc.unref();
+  } catch (e) {
+    console.error("[SCRCPY ERROR]", e);
+    return res.status(500).json({ ok: false, step: "scrcpy_spawn", error: String(e) });
+  }
   return res.json({ ok: true, message: `Conectando a ${target} y lanzando scrcpy...` });
 });
 
 app.post("/conectar-usb", requireAuth, async (_req, res) => {
-  try { const sc = spawn("scrcpy", [], { stdio: "ignore", detached: true }); sc.unref(); return res.json({ ok: true, message: "scrcpy (USB) iniciado" }); }
-  catch (e) { console.error("[SCRCPY ERROR]", e); return res.status(500).json({ ok: false, error: String(e) }); }
+  try {
+    const sc = spawn("scrcpy", [], { stdio: "ignore", detached: true });
+    sc.unref();
+    return res.json({ ok: true, message: "scrcpy (USB) iniciado" });
+  } catch (e) {
+    console.error("[SCRCPY ERROR]", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 /* ====== WS /ws ====== */
@@ -124,10 +139,12 @@ function onPanelConnect(ws) {
   ws.isAlive = true;
   ws.on("pong", () => (ws.isAlive = true));
   sendOK(ws, "app_status", { connected: !!appWS });
+
   ws.on("message", (raw) => {
     let msg = null;
     try { msg = JSON.parse(String(raw)); } catch { return; }
     if (!msg) return;
+
     if (msg.type === "cmd") {
       const action = String(msg?.payload?.action || "").toLowerCase();
       if (action === "status") return sendOK(ws, "status", { online: !!appWS, state: appWS ? "ready" : "idle" });
@@ -136,52 +153,96 @@ function onPanelConnect(ws) {
       try { appWS.send(JSON.stringify(msg)); } catch {}
       return;
     }
+
     if (msg.type === "ping") return sendOK(ws, "pong", { ts: Date.now() });
   });
+
   ws.on("close", () => panels.delete(ws));
 }
 
 function onAppConnect(ws) {
-  if (appWS && appWS !== ws && appWS.readyState === WebSocket.OPEN) { try { appWS.close(1012, "replaced"); } catch {} }
+  if (appWS && appWS !== ws && appWS.readyState === WebSocket.OPEN) {
+    try { appWS.close(1012, "replaced"); } catch {}
+  }
   appWS = ws;
   ws.isAlive = true;
   ws.on("pong", () => (ws.isAlive = true));
   broadcastToPanelsJSON({ type: "app_status", payload: { connected: true } });
+
   ws.on("message", (data, isBinary) => {
     if (isBinary) return broadcastToPanelsBinary(data);
     const text = data.toString();
-    try { const msg = JSON.parse(text); broadcastToPanelsJSON(msg); } catch { console.error("[WS JSON ERROR]", text); }
+    try {
+      const msg = JSON.parse(text);
+      broadcastToPanelsJSON(msg);
+    } catch {
+      console.error("[WS JSON ERROR]", text);
+    }
   });
-  ws.on("close", () => { appWS = null; broadcastToPanelsJSON({ type: "app_status", payload: { connected: false } }); });
+
+  ws.on("close", () => {
+    appWS = null;
+    broadcastToPanelsJSON({ type: "app_status", payload: { connected: false } });
+  });
 }
 
-wss.on("connection", (ws) => { if (ws._role === "app") return onAppConnect(ws); return onPanelConnect(ws); });
+wss.on("connection", (ws) => {
+  if (ws._role === "app") return onAppConnect(ws);
+  return onPanelConnect(ws);
+});
 
+/* ====== 🔧 UPGRADE con soporte para 3 modos: query, 2 subprotocolos, 1 combinado ====== */
 server.on("upgrade", (request, socket, head) => {
-  const { pathname } = url.parse(request.url, true);
-  if (pathname !== "/ws") return deny(socket);
+  const parsed = url.parse(request.url, true);
+  if (parsed.pathname !== "/ws") return deny(socket);
 
+  // CORS de origen (si se desea forzar dominio)
   const origin = String(request.headers.origin || "");
   if (ALLOWED_ORIGIN !== "*" && origin && !origin.startsWith(ALLOWED_ORIGIN)) return deny(socket);
 
+  // 1) Intentar obtener role/token desde query
+  let role  = String(parsed.query.role || "").toLowerCase();
+  let token = String(parsed.query.token || "");
+
+  // 2) Intentar desde subprotocolos
   const sec = String(request.headers["sec-websocket-protocol"] || "");
   const protos = sec.split(",").map(s => s.trim()).filter(Boolean);
-  const roleFromProto  = (protos[0] || "panel").toLowerCase();
-  const tokenFromProto = protos[1] || "";
 
-  // ✅ Solo aceptar token vía protocolo
-  if (!tokenFromProto || tokenFromProto !== TOKEN) {
-    console.error("[WS DENY] Token inválido:", tokenFromProto);
-    return deny(socket);
+  // Caso 1 subprotocolo combinado: "panel:TOKEN" (ideal para wscat)
+  if (!token && protos.length === 1 && protos[0].includes(":")) {
+    const [pRole, pToken] = protos[0].split(":");
+    role  = role  || String(pRole || "").toLowerCase();
+    token = token || String(pToken || "");
+  }
+  // Caso 2 subprotocolos: ["panel","TOKEN"]
+  else if (!token && protos.length >= 2) {
+    role  = role  || String(protos[0] || "").toLowerCase();
+    token = token || String(protos[1] || "");
+  }
+  // Caso 1 subprotocolo simple: ["panel"]
+  else if (!role && protos.length === 1) {
+    role = String(protos[0] || "").toLowerCase();
   }
 
-  const role = roleFromProto === "app" ? "app" : "panel";
-  wss.handleUpgrade(request, socket, head, (ws) => { ws._role = role; wss.emit("connection", ws, request); });
+  // Validaciones
+  if (!role || !token) return deny(socket);
+  if (token !== TOKEN)  return deny(socket);
+  if (role !== "app" && role !== "panel") role = "panel";
+
+  // Upgrade OK
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    ws._role = role;
+    wss.emit("connection", ws, request);
+  });
 });
 
 /* ====== Heartbeat ====== */
 const hb = setInterval(() => {
-  wss.clients.forEach((ws) => { if (!ws.isAlive) return ws.terminate(); ws.isAlive = false; ws.ping(); });
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
 }, 30_000);
 wss.on("close", () => clearInterval(hb));
 
