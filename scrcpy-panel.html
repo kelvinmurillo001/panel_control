@@ -74,6 +74,7 @@
         <button id="stop"  class="secondary" disabled>Stop</button>
         <button id="status" class="secondary" disabled>Estado</button>
         <button id="clear" class="ghost">Limpiar log</button>
+        <button id="reset" class="ghost">Reset</button>
       </div>
 
       <div class="mini" id="msg">Listo.</div>
@@ -93,18 +94,6 @@
       <p class="mini" style="margin-top:8px">Usa Chrome/Edge recientes (requiere <b>WebCodecs</b>).</p>
     </div>
   </div>
-</div>
-
-<!-- Visor flotante -->
-<div id="floatBox" class="floatbox hidden" role="dialog" aria-label="Visor flotante">
-  <div id="dragHandle" class="bar">
-    <div class="title">Vista del dispositivo</div>
-    <div class="btns">
-      <button id="btnFull">Pantalla completa</button>
-      <button id="btnClose">Cerrar</button>
-    </div>
-  </div>
-  <div id="floatBody" class="body"></div>
 </div>
 
 <!-- Modal Ajustes -->
@@ -186,35 +175,12 @@ function startHeartbeat(){
 }
 function stopHeartbeat(){ if(beat){ clearInterval(beat); beat=null; } }
 
-/* ===== Visor flotante ===== */
-const viewCanvas = $("#view");
-const stage = viewCanvas.parentElement;
-const overlay = $("#viewOverlay");
-const floatBox = $("#floatBox");
-const floatBody = $("#floatBody");
-const btnFull = $("#btnFull");
-const btnClose = $("#btnClose");
-const dragHandle = $("#dragHandle");
-let popped = false;
-function ensureViewerOpen(){
-  if (!popped){
-    floatBody.appendChild(viewCanvas);
-    floatBox.classList.remove("hidden");
-    popped = true;
-  }
-}
-btnClose.addEventListener("click", ()=>{ if (popped){ stage.appendChild(viewCanvas); floatBox.classList.add("hidden"); popped=false; }});
-btnFull.addEventListener("click", async ()=>{ try{ if(!document.fullscreenElement) await floatBox.requestFullscreen(); else await document.exitFullscreen(); } catch(e){ log("Fullscreen:", e.message||e); }});
-let drag=null;
-dragHandle.addEventListener("mousedown",(e)=>{ if(!popped) return; drag={dx:e.clientX-floatBox.offsetLeft, dy:e.clientY-floatBox.offsetTop}; document.body.style.userSelect='none'; });
-window.addEventListener("mousemove",(e)=>{ if(!drag) return; floatBox.style.left=(e.clientX-drag.dx)+'px'; floatBox.style.top=(e.clientY-drag.dy)+'px'; });
-window.addEventListener("mouseup",()=>{ drag=null; document.body.style.userSelect=''; });
-
-function resetDecoder(){
-  try { if (decoder && decoder.state !== "closed") decoder.close(); } catch {}
-  decoder = null; configured = false; lastSps = lastPps = null; knownFormat = null;
-  overlay.textContent = "Esperando video…";
-}
+/* ===== Botón Reset ===== */
+$("#reset").onclick = () => {
+  if(ws) try{ ws.close(1000,"manual reset"); }catch{};
+  setTimeout(connect,200);
+  log("🔄 Reset de conexión forzado.");
+};
 
 /* ===== Conexión WS (token robusto) ===== */
 function connect(){
@@ -222,9 +188,6 @@ function connect(){
   manualClose = false;
 
   const h = HOSTS[hostIndex % HOSTS.length];
-
-  // Si el token es un RFC7230 "token" (sin espacios), lo mandamos como subprotocolo;
-  // si tiene espacios u otros, lo pasamos por query (?token=...); si está vacío, no se envía.
   let URL = `${wsOf(h)}?role=panel`;
   let protocols = ["panel"];
   const TK = (token || "").trim();
@@ -237,16 +200,14 @@ function connect(){
 
   wsu.textContent = wsOf(h);
 
-  try {
-    ws = new WebSocket(URL, protocols);
-  } catch {
-    log("URL inválida del WebSocket");
-    return;
-  }
+  try { ws = new WebSocket(URL, protocols); }
+  catch { log("URL inválida del WebSocket"); return; }
+
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
-    retry = 0; setPanelState(true); log("Conectado al relay ("+h+")");
+    retry = 0; setPanelState(true);
+    log("✅ Conectado al relay ("+h+") con token:", TK ? "***" : "(vacío)");
     startHeartbeat(); send({ type:"cmd", payload:{ action:"status" } });
   };
   ws.onclose = () => {
@@ -258,188 +219,59 @@ function connect(){
       hostIndex = (hostIndex + 1) % HOSTS.length;
       log(`Desconectado. Reintentando en ${Math.round((base+jitter)/1000)}s… (host ${HOSTS[hostIndex]})`);
       setTimeout(connect, base + jitter);
-    } else { log("Desconectado."); }
+    } else { log("Desconectado manualmente."); }
   };
-  ws.onerror = () => {};
+  ws.onerror = (ev) => { log("⚠️ Error WS:", ev.message || ev); };
 
   ws.onmessage = (ev) => {
-    if (ev.data instanceof ArrayBuffer) {
-      ensureViewerOpen();
-      pushFrameGeneric(new Uint8Array(ev.data));
-      return;
-    }
-    const m = safeJSON(ev.data);
-    if (!m) return;
-
+    if (ev.data instanceof ArrayBuffer) { ensureViewerOpen(); pushFrameGeneric(new Uint8Array(ev.data)); return; }
+    const m = safeJSON(ev.data); if (!m) return;
     if (m.type) log(`Evento: ${m.type}`);
-
-    if (m.type === "app_status"){
-      if (m.payload && m.payload.connected){ appSeen = true; appAliveTs = Date.now(); setAppState("ok"); }
-      else setAppState("err");
-      return;
-    }
-    if (m.type === "pong"){
-      appSeen = true; appAliveTs = Date.now(); setAppState("ok"); log("Pong recibido");
-      return;
-    }
-    if (m.type === "status"){
-      const p = m.payload || {};
-      if (typeof p.online === "boolean"){
-        if (p.online){ appSeen = true; setAppState("ok"); appAliveTs = Date.now(); }
-        else setAppState("err");
-      }
-      if (p.state){
-        log("Estado de la app: " + p.state);
-        if (/starting|running/i.test(p.state)) ensureViewerOpen();
-      }
-      return;
-    }
-    if (m.type === "h264_config") {
-      const w = m.payload?.w|0, h = m.payload?.h|0;
-      const sps_b64 = m.payload?.sps_b64 || "";
-      const pps_b64 = m.payload?.pps_b64 || "";
-      if (sps_b64 && pps_b64) {
-        const sps = b64ToU8(sps_b64), pps = b64ToU8(pps_b64);
-        configureDecoderFromSpsPps(sps, pps, w, h);
-      }
-      return;
-    }
-    if (m.type === "app_data" && m.base64) {
-      ensureViewerOpen();
-      pushFrameGeneric(b64ToU8(m.base64));
-      return;
-    }
+    if (m.type === "app_status"){ if (m.payload?.connected){ appSeen=true; appAliveTs=Date.now(); setAppState("ok"); } else setAppState("err"); return; }
+    if (m.type === "pong"){ appSeen=true; appAliveTs=Date.now(); setAppState("ok"); log("Pong recibido"); return; }
+    if (m.type === "status"){ const p=m.payload||{}; if(typeof p.online==="boolean"){ if(p.online){appSeen=true;setAppState("ok");appAliveTs=Date.now();} else setAppState("err"); } if(p.state){ log("Estado de la app: "+p.state); if(/starting|running/i.test(p.state)) ensureViewerOpen(); } return; }
+    if (m.type === "h264_config"){ const w=m.payload?.w|0,h=m.payload?.h|0; const sps_b64=m.payload?.sps_b64||"", pps_b64=m.payload?.pps_b64||""; if(sps_b64&&pps_b64){ const sps=b64ToU8(sps_b64), pps=b64ToU8(pps_b64); configureDecoderFromSpsPps(sps,pps,w,h);} return; }
+    if (m.type === "app_data" && m.base64){ ensureViewerOpen(); pushFrameGeneric(b64ToU8(m.base64)); return; }
   };
 }
 
 /* ===== WebCodecs (H.264) ===== */
-const canvas = $("#view");
-const ctx2d = canvas.getContext("2d");
-let decoder = null;
-let configured = false;
-let lastSps = null, lastPps = null;
-let ts = 0;                 // µs
-const frameDur = 1e6/30;
-let dropCount = 0;
-let knownFormat = null;     // "annexb" | "avcc"
-
+const canvas = $("#view"); const ctx2d = canvas.getContext("2d");
+let decoder=null, configured=false, lastSps=null, lastPps=null, ts=0, frameDur=1e6/30, dropCount=0, knownFormat=null;
 function b64ToU8(s){ const b=atob(s); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
 function hex2(n){ return n.toString(16).padStart(2,"0"); }
 
-function buildAvcC(sps, pps){
-  const profile = sps[1], compat = sps[2], level = sps[3];
-  const len = 7 + 2 + sps.length + 1 + 2 + pps.length;
-  const out = new Uint8Array(len);
-  let p = 0;
-  out[p++] = 1; out[p++] = profile; out[p++] = compat; out[p++] = level;
-  out[p++] = 0xFF; out[p++] = 0xE1;
-  out[p++] = (sps.length>>>8)&0xFF; out[p++] = sps.length&0xFF; out.set(sps, p); p+=sps.length;
-  out[p++] = 1; out[p++] = (pps.length>>>8)&0xFF; out[p++] = pps.length&0xFF; out.set(pps, p);
-  const codec = `avc1.${hex2(profile)}${hex2(compat)}${hex2(level)}`;
-  return { avcc: out, codec };
-}
+function buildAvcC(sps,pps){ const profile=sps[1],compat=sps[2],level=sps[3]; const len=7+2+sps.length+1+2+pps.length; const out=new Uint8Array(len); let p=0; out[p++]=1;out[p++]=profile;out[p++]=compat;out[p++]=level; out[p++]=0xFF;out[p++]=0xE1; out[p++]=(sps.length>>>8)&0xFF;out[p++]=sps.length&0xFF; out.set(sps,p);p+=sps.length; out[p++]=1; out[p++]=(pps.length>>>8)&0xFF; out[p++]=pps.length&0xFF; out.set(pps,p); const codec=`avc1.${hex2(profile)}${hex2(compat)}${hex2(level)}`; return {avcc:out,codec}; }
 
-function configureDecoderFromSpsPps(sps, pps, w, h){
-  if (!("VideoDecoder" in window)) { log("WebCodecs no disponible."); return; }
-  const { avcc, codec } = buildAvcC(sps, pps);
-  if (!decoder) {
-    decoder = new VideoDecoder({
-      output: frame => {
-        try {
-          if (canvas.width !== frame.codedWidth || canvas.height !== frame.codedHeight) {
-            canvas.width = frame.codedWidth; canvas.height = frame.codedHeight;
-          }
-          ctx2d.drawImage(frame, 0, 0, canvas.width, canvas.height);
-          frame.close();
-        } catch(e){}
-      },
-      error: e => { configured=false; log("Decoder error:", e.message||e); }
-    });
-  } else if (decoder.state === "closed") {
-    decoder = null; return configureDecoderFromSpsPps(sps, pps, w, h);
-  }
-  try {
-    decoder.configure({
-      codec,
-      description: avcc.buffer,
-      hardwareAcceleration: "prefer-hardware",
-      optimizeForLatency: true
-    });
-    configured = true; dropCount = 0;
-    vinfo.textContent = `${w||canvas.width}×${h||canvas.height} • ${codec} • ${knownFormat||"?"}`;
-    overlay.textContent = "";
-    ensureViewerOpen();
-    log("Decoder configurado:", codec, "formato:", knownFormat||"?");
-  } catch(e){ configured=false; log("Fallo al configurar decoder:", e.message||e); }
-}
-
-/* --- Utilidades Annex-B y AVCC --- */
-function isAnnexB(u8){
-  for(let i=0;i+3<u8.length;i++){
-    if (u8[i]===0 && u8[i+1]===0 && (u8[i+2]===1 || (u8[i+2]===0 && u8[i+3]===1))) return true;
-  }
-  return false;
-}
-function splitAnnexB(u8){
-  const out=[]; let i=0, start=-1;
-  const isStart=(k)=> u8[k]===0 && u8[k+1]===0 && ((u8[k+2]===1) || (u8[k+2]===0 && u8[k+3]===1));
-  while(i < u8.length-3){
-    if(isStart(i)){
-      if(start>=0) out.push(u8.slice(start, i));
-      i += (u8[i+2]===1?3:4); start = i;
-    } else i++;
-  }
-  if(start>=0) out.push(u8.slice(start));
-  return out.map(n => ({t:n[0]&0x1F, d:n}));
-}
-function trySplitAVCC(u8, lenSize){
-  const nals=[]; let p=0; const L=lenSize;
-  while(p+L<=u8.length){
-    let n=0; for(let i=0;i<L;i++){ n=(n<<8)|u8[p+i]; }
-    p+=L;
-    if(n<=0 || p+n>u8.length) return null;
-    nals.push({t:(u8[p]&0x1F), d:u8.slice(p, p+n)}); p+=n;
-  }
-  if (p!==u8.length) return null;
-  return nals;
-}
-function splitAVCCAuto(u8){
-  return trySplitAVCC(u8,4) || trySplitAVCC(u8,3) || trySplitAVCC(u8,2) || trySplitAVCC(u8,1);
-}
-function avccToAnnexB(u8){
-  const nals = splitAVCCAuto(u8); if(!nals) return null;
-  const parts=[];
-  for(const n of nals){ parts.push(new Uint8Array([0,0,0,1])); parts.push(n.d); }
-  let total=0; for(const p of parts) total+=p.length;
-  const out=new Uint8Array(total); let o=0; for(const p of parts){ out.set(p,o); o+=p.length; }
-  return {bytes:out, nals};
+function configureDecoderFromSpsPps(sps,pps,w,h){
+  if (!("VideoDecoder" in window)) { overlay.textContent="⚠️ WebCodecs no disponible (usa Chrome/Edge)"; log("WebCodecs no disponible."); return; }
+  const { avcc, codec }=buildAvcC(sps,pps);
+  if (!decoder){ decoder=new VideoDecoder({ output:frame=>{ try{ if(canvas.width!==frame.codedWidth||canvas.height!==frame.codedHeight){ canvas.width=frame.codedWidth;canvas.height=frame.codedHeight; } ctx2d.drawImage(frame,0,0,canvas.width,canvas.height); frame.close(); }catch(e){} }, error:e=>{configured=false; log("Decoder error:",e.message||e);} }); }
+  else if(decoder.state==="closed"){ decoder=null; return configureDecoderFromSpsPps(sps,pps,w,h); }
+  try{ decoder.configure({ codec, description:avcc.buffer, hardwareAcceleration:"prefer-hardware", optimizeForLatency:true }); configured=true; dropCount=0; vinfo.textContent=`${w||canvas.width}×${h||canvas.height} • ${codec} • ${knownFormat||"?"}`; overlay.textContent=""; ensureViewerOpen(); log("Decoder configurado:",codec,"formato:",knownFormat||"?"); }
+  catch(e){ configured=false; log("Fallo al configurar decoder:",e.message||e); }
 }
 
 /* --- Pipeline genérico --- */
-function maybeConfigureFromNals(nals){
-  for (const n of nals){ if (n.t===7) lastSps=n.d; else if (n.t===8) lastPps=n.d; }
-  if (!configured && lastSps && lastPps) configureDecoderFromSpsPps(lastSps, lastPps);
-}
-function findNalTypeFromNals(nals){ return nals && nals.length ? nals[0].t : 1; }
+function isAnnexB(u8){ for(let i=0;i+3<u8.length;i++){ if(u8[i]===0&&u8[i+1]===0&&(u8[i+2]===1||(u8[i+2]===0&&u8[i+3]===1))) return true; } return false; }
+function splitAnnexB(u8){ const out=[]; let i=0,start=-1; const isStart=(k)=>u8[k]===0&&u8[k+1]===0&&((u8[k+2]===1)||(u8[k+2]===0&&u8[k+3]===1)); while(i<u8.length-3){ if(isStart(i)){ if(start>=0) out.push(u8.slice(start,i)); i+=(u8[i+2]===1?3:4); start=i;} else i++; } if(start>=0) out.push(u8.slice(start)); return out.map(n=>({t:n[0]&0x1F,d:n})); }
+function trySplitAVCC(u8,lenSize){ const nals=[]; let p=0,L=lenSize; while(p+L<=u8.length){ let n=0; for(let i=0;i<L;i++){ n=(n<<8)|u8[p+i]; } p+=L; if(n<=0||p+n>u8.length) return null; nals.push({t:(u8[p]&0x1F),d:u8.slice(p,p+n)}); p+=n; } if(p!==u8.length) return null; return nals; }
+function splitAVCCAuto(u8){ return trySplitAVCC(u8,4)||trySplitAVCC(u8,3)||trySplitAVCC(u8,2)||trySplitAVCC(u8,1); }
+function avccToAnnexB(u8){ const nals=splitAVCCAuto(u8); if(!nals) return null; const parts=[]; for(const n of nals){ parts.push(new Uint8Array([0,0,0,1])); parts.push(n.d); } let total=0; for(const p of parts) total+=p.length; const out=new Uint8Array(total); let o=0; for(const p of parts){ out.set(p,o);o+=p.length;} return {bytes:out,nals}; }
+
+function maybeConfigureFromNals(nals){ for(const n of nals){ if(n.t===7) lastSps=n.d; else if(n.t===8) lastPps=n.d; } if(!configured&&lastSps&&lastPps) configureDecoderFromSpsPps(lastSps,lastPps); }
+function findNalTypeFromNals(nals){ return nals&&nals.length?nals[0].t:1; }
 
 function pushFrameGeneric(bytes){
-  let nals=null, data=null;
-  if (isAnnexB(bytes)){
-    knownFormat = knownFormat || "annexb";
-    nals = splitAnnexB(bytes);
-    data = bytes;
-  } else {
-    const conv = avccToAnnexB(bytes);
-    if (conv){ knownFormat = knownFormat || "avcc"; nals = conv.nals; data = conv.bytes; }
-    else { overlay.textContent = "Formato de frame desconocido"; return; }
-  }
-  if (!configured){ maybeConfigureFromNals(nals); if (!configured){ overlay.textContent = "Recibiendo… (esperando SPS/PPS)"; } }
-  if (!configured) return;
-
-  if (decoder.decodeQueueSize > 6) { dropCount++; if (dropCount % 10 === 0) log(`drop frames: ${dropCount}`); return; }
-  const nalType = findNalTypeFromNals(nals);
-  const chunk = new EncodedVideoChunk({ type: (nalType===5 ? "key" : "delta"), timestamp: (ts+=frameDur), data });
-  try { decoder.decode(chunk); overlay.textContent=""; } catch(e){}
+  let nals=null,data=null;
+  if(isAnnexB(bytes)){ knownFormat=knownFormat||"annexb"; nals=splitAnnexB(bytes); data=bytes; }
+  else { const conv=avccToAnnexB(bytes); if(conv){ knownFormat=knownFormat||"avcc"; nals=conv.nals; data=conv.bytes; } else { overlay.textContent="⚠️ Frame desconocido"; return; } }
+  if(!configured){ maybeConfigureFromNals(nals); if(!configured){ overlay.textContent="Recibiendo… (esperando SPS/PPS)"; } }
+  if(!configured) return;
+  if(decoder.decodeQueueSize>6){ dropCount++; if(dropCount%10===0) log(`drop frames: ${dropCount}`); return; }
+  const nalType=findNalTypeFromNals(nals);
+  const chunk=new EncodedVideoChunk({ type:(nalType===5?"key":"delta"), timestamp:(ts+=frameDur), data });
+  try{ decoder.decode(chunk); overlay.textContent=""; } catch(e){ log("Decode error:",e.message||e); }
 }
 
 /* ===== Botones ===== */
@@ -450,39 +282,14 @@ $("#stop").onclick   = () => send({ type:"cmd", payload:{ action:"stop"   } });
 $("#status").onclick = () => send({ type:"cmd", payload:{ action:"status" } });
 $("#clear").onclick  = () => { logEl.textContent=""; msg.textContent="Listo."; };
 
-/* ===== Atajos + reconexión ===== */
-window.addEventListener("keydown",(e)=>{ const k = e.key.toLowerCase(); if(k==="p") $("#ping").click(); if(k==="s") $("#start").click(); if(k==="x") $("#stop").click(); if(k==="a"){ e.preventDefault(); $("#openSettings").click(); }});
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ clearTimeout(visTimer); visTimer = setTimeout(() => { if (!ws || ws.readyState !== 1) connect(); }, 300); }});
-window.addEventListener("offline", () => { log("Sin conexión de red."); badgeUpdate(wsBadge, 'WS: <b>Desconectado</b>', 'err'); });
-window.addEventListener("online",  () => { log("Conexión restaurada."); if(!ws || ws.readyState!==1) connect(); });
-
 /* ===== Modal Ajustes ===== */
-const dlg = $("#dlg");
-$("#openSettings").onclick = () => {
-  const c = cfgGet();
-  $("#inToken").value = c.token || "";
-  $("#inHost").value = c.host || (location.host||"");
-  $("#inPath").value = c.path || "/ws";
-  dlg.showModal();
-};
-$("#btnSave").onclick = (e) => {
-  e.preventDefault();
-  token = $("#inToken").value.trim();
-  host  = $("#inHost").value.trim() || (location.host||"144.126.129.233");
-  path  = $("#inPath").value.trim() || "/ws";
-  cfgSet({ token, host, path });
-  HOSTS.length = 0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`);
-  wsu.textContent = wsOf(host);
-  dlg.close();
-  if(ws && ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} }
-  setTimeout(connect, 200);
-};
-$("#btnClose").onclick = (e)=>{ e.preventDefault(); dlg.close(); };
+const dlg=$("#dlg");
+$("#openSettings").onclick=()=>{ const c=cfgGet(); $("#inToken").value=c.token||""; $("#inHost").value=c.host||(location.host||""); $("#inPath").value=c.path||"/ws"; dlg.showModal(); };
+$("#btnSave").onclick=(e)=>{ e.preventDefault(); token=$("#inToken").value.trim(); host=$("#inHost").value.trim()||(location.host||"144.126.129.233"); path=$("#inPath").value.trim()||"/ws"; cfgSet({token,host,path}); HOSTS.length=0; HOSTS.push(host); if(!/nip\.io$/i.test(host)) HOSTS.push(`${host}.nip.io`); wsu.textContent=wsOf(host); dlg.close(); if(ws&&ws.readyState===1){ try{ ws.close(1000,"reconfig"); }catch{} } setTimeout(connect,200); };
+$("#btnClose").onclick=(e)=>{ e.preventDefault(); dlg.close(); };
 
 /* ===== Estado inicial ===== */
-setPanelState(false); setAppState("err");
-wsu.textContent = wsOf(host);
-connect();
+setPanelState(false); setAppState("err"); wsu.textContent = wsOf(host); connect();
 </script>
 </body>
 </html>

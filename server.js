@@ -1,4 +1,4 @@
-// 📁 panel de control/server.js (PROD en IP pública)
+// 📁 panel_control/server.js (PROD en VPS)
 "use strict";
 
 const express   = require("express");
@@ -8,14 +8,16 @@ const { spawn } = require("child_process");
 const http      = require("http");
 const WebSocket = require("ws");
 const url       = require("url");
+const fs        = require("fs");
 
 const app = express();
 
 const PORT           = Number(process.env.PORT || 5501);
-const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || "*"; // en prod: https://TU-DOMINIO o https://144.126.129.233
+const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || "*";
 const STATIC_DIR     = path.join(__dirname, "public");
 const TOKEN          = process.env.TOKEN || "CAMBIA_ESTE_TOKEN_SUPER_SEGURO_2025";
 
+/* ====== Middleware ====== */
 app.use(
   cors({
     origin: (origin, cb) => {
@@ -30,14 +32,16 @@ app.use(
 app.use(express.json());
 app.use(express.static(STATIC_DIR));
 
+/* ====== Panel ====== */
 app.get("/", (req, res, next) => {
   const panelAtRoot = path.join(__dirname, "scrcpy-panel.html");
   const panelInPub  = path.join(STATIC_DIR, "scrcpy-panel.html");
-  if (require("fs").existsSync(panelInPub)) return res.sendFile(panelInPub);
-  if (require("fs").existsSync(panelAtRoot)) return res.sendFile(panelAtRoot);
+  if (fs.existsSync(panelInPub)) return res.sendFile(panelInPub);
+  if (fs.existsSync(panelAtRoot)) return res.sendFile(panelAtRoot);
   return next();
 });
 
+/* ====== Utils ====== */
 const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/;
 const isValidIPv4 = (ip) => IPV4_RE.test(ip);
 const isValidPort = (p) => Number.isInteger(Number(p)) && Number(p) >= 1 && Number(p) <= 65535;
@@ -59,46 +63,35 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ ok: false, error: "unauthorized" });
 }
 
+/* ====== Health ====== */
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true, ts: Date.now(), version: "1.0.0" });
 });
 
-/* ====== Endpoints opcionales (ADB/scrcpy en VPS) ====== */
+/* ====== Endpoints opcionales ====== */
 app.post("/conectar-wifi", requireAuth, async (req, res) => {
   const ip   = String(req.body?.ip || "").trim();
   const port = Number(req.body?.port || 5555);
   if (!ip || !isValidIPv4(ip))  return res.status(400).json({ ok: false, error: "IP inválida" });
   if (!isValidPort(port))       return res.status(400).json({ ok: false, error: "Puerto inválido" });
+
   const target = `${ip}:${port}`;
   const adb = await run("adb", ["connect", target]);
   if (!adb.ok && !/already\s+connected/i.test(adb.stdout + adb.stderr)) {
+    console.error("[ADB ERROR]", adb.stderr || adb.stdout);
     return res.status(500).json({ ok: false, step: "adb_connect", error: adb.stderr || adb.stdout || "Fallo adb connect" });
   }
   try { const sc = spawn("scrcpy", ["-s", target], { stdio: "ignore", detached: true }); sc.unref(); }
-  catch (e) { return res.status(500).json({ ok: false, step: "scrcpy_spawn", error: String(e) }); }
+  catch (e) { console.error("[SCRCPY ERROR]", e); return res.status(500).json({ ok: false, step: "scrcpy_spawn", error: String(e) }); }
   return res.json({ ok: true, message: `Conectando a ${target} y lanzando scrcpy...` });
 });
 
 app.post("/conectar-usb", requireAuth, async (_req, res) => {
   try { const sc = spawn("scrcpy", [], { stdio: "ignore", detached: true }); sc.unref(); return res.json({ ok: true, message: "scrcpy (USB) iniciado" }); }
-  catch (e) { return res.status(500).json({ ok: false, error: String(e) }); }
+  catch (e) { console.error("[SCRCPY ERROR]", e); return res.status(500).json({ ok: false, error: String(e) }); }
 });
 
-app.post("/conectar", requireAuth, async (req, res) => {
-  const ip   = String(req.body?.ip || "").trim();
-  const port = 5555;
-  if (!ip || !isValidIPv4(ip)) return res.status(400).json({ ok: false, error: "IP inválida" });
-  const target = `${ip}:${port}`;
-  const adb = await run("adb", ["connect", target]);
-  if (!adb.ok && !/already\s+connected/i.test(adb.stdout + adb.stderr)) {
-    return res.status(500).json({ ok: false, step: "adb_connect", error: adb.stderr || adb.stdout || "Fallo adb connect" });
-  }
-  try { const sc = spawn("scrcpy", ["-s", target], { stdio: "ignore", detached: true }); sc.unref(); }
-  catch (e) { return res.status(500).json({ ok: false, step: "scrcpy_spawn", error: String(e) }); }
-  return res.json({ ok: true, message: `Conectando a ${target} y lanzando scrcpy...` });
-});
-
-/* ====== WS /ws (roles: panel | app) ====== */
+/* ====== WS /ws ====== */
 const server = http.createServer(app);
 const wss    = new WebSocket.Server({ noServer: true });
 
@@ -146,7 +139,7 @@ function onAppConnect(ws) {
   ws.on("message", (data, isBinary) => {
     if (isBinary) return broadcastToPanelsBinary(data);
     const text = data.toString();
-    try { const msg = JSON.parse(text); broadcastToPanelsJSON(msg); } catch {}
+    try { const msg = JSON.parse(text); broadcastToPanelsJSON(msg); } catch { console.error("[WS JSON ERROR]", text); }
   });
   ws.on("close", () => { appWS = null; broadcastToPanelsJSON({ type: "app_status", payload: { connected: false } }); });
 }
@@ -156,27 +149,43 @@ wss.on("connection", (ws) => { if (ws._role === "app") return onAppConnect(ws); 
 server.on("upgrade", (request, socket, head) => {
   const { pathname, query } = url.parse(request.url, true);
   if (pathname !== "/ws") return deny(socket);
+
   const origin = String(request.headers.origin || "");
   if (ALLOWED_ORIGIN !== "*" && origin && !origin.startsWith(ALLOWED_ORIGIN)) return deny(socket);
+
   const sec = String(request.headers["sec-websocket-protocol"] || "");
   const protos = sec.split(",").map(s => s.trim()).filter(Boolean);
   const roleFromProto  = (protos[0] || "panel").toLowerCase();
   const tokenFromProto = protos[1] || "";
   const tokenFromQuery = (query?.token || "").toString();
   const okToken = (tokenFromProto && tokenFromProto === TOKEN) || (tokenFromQuery && tokenFromQuery === TOKEN);
-  if (!okToken) return deny(socket);
+
+  if (!okToken) {
+    console.error("[WS DENY] Token inválido:", tokenFromProto || tokenFromQuery);
+    return deny(socket);
+  }
+
   const role = roleFromProto === "app" ? "app" : "panel";
   wss.handleUpgrade(request, socket, head, (ws) => { ws._role = role; wss.emit("connection", ws, request); });
 });
 
+/* ====== Heartbeat ====== */
 const hb = setInterval(() => {
   wss.clients.forEach((ws) => { if (!ws.isAlive) return ws.terminate(); ws.isAlive = false; ws.ping(); });
 }, 30_000);
 wss.on("close", () => clearInterval(hb));
 
-/* ====== Arranque en IP pública del VPS ====== */
-server.listen(PORT, "144.126.129.233", () => {
-  console.log(`🟢 API + WS en http://144.126.129.233:${PORT}`);
-  console.log(`   REST: POST /conectar-usb | POST /conectar-wifi | GET /healthz  (Authorization: Bearer <TOKEN>)`);
-  console.log(`   WS  : GET /ws?role=panel|app  (token via Sec-WebSocket-Protocol, fallback ?token=****)`);
+/* ====== Arranque ====== */
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🟢 API + WS escuchando en 0.0.0.0:${PORT}`);
+  console.log(`🌍 Acceso público:  http://144.126.129.233:${PORT}`);
+  console.log(`🌐 Panel web:      http://144.126.129.233/scrcpy-panel.html`);
+});
+
+/* ====== Manejo global de fallos ====== */
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] uncaughtException:", err);
+});
+process.on("unhandledRejection", (reason, p) => {
+  console.error("[FATAL] unhandledRejection at:", p, "reason:", reason);
 });
