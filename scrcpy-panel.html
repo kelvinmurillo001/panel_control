@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>  
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
@@ -242,7 +242,7 @@ function configureDecoderFromSpsPps(sps,pps,w,h){
 }
 
 /* ==============================
-   NAL utils (igual que antes)
+   NAL utils
 ================================= */
 function b64ToU8(s){ const b=atob(s); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
 function hex2(n){ return n.toString(16).padStart(2,"0"); }
